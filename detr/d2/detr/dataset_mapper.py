@@ -85,7 +85,7 @@ class DetrDatasetMapper:
         if self.crop_gen is None:
             image, transforms = T.apply_transform_gens(self.tfm_gens, image)
         else:
-            if np.random.rand() > 0.5:
+            if torch.rand(()).item() > 0.5:
                 image, transforms = T.apply_transform_gens(self.tfm_gens, image)
             else:
                 image, transforms = T.apply_transform_gens(
