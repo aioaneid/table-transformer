@@ -20,7 +20,8 @@ Here is a log of the corrections we made:
  - Fixed the end-col for two cells; split the table into two regions/tables in us-gov-dataset/us-020-str.xml, table 0
  - Fixed the end-col for two cells; split the table into two regions/tables in us-gov-dataset/us-020-str.xml, table 1
  - Fixed the end-col for a cell in us-gov-dataset/us-012-str.xml, table 2
- - Fixed the end-col for a cell; fixed the start-row for several cells in us-gov-dataset/us-012-str.xml, table 3
+ - Fixed the end-col for a cell;
+fixed the start-row for several cells in us-gov-dataset/us-012-str.xml, table 3
  - Fixed the start-row for many cells in us-gov-dataset/us-025-str.xml, table 0
  - Fixed many start-rows, at least one start-col, and at least one text content in us-gov-dataset/us-019-str.xml, table 0
  - Fixed the y2 coordinate for a cell in us-gov-dataset/us-001-str.xml

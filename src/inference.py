@@ -4,8 +4,7 @@ import argparse
 import sys
 import xml.etree.ElementTree as ET
 import os
-import random
-import io
+import grits
 
 import torch
 from torchvision import transforms
@@ -103,8 +102,6 @@ def get_args():
                         help='Output cropped data from table detections')
     parser.add_argument('--objects', '-o', action='store_true',
                         help='Output objects')
-    parser.add_argument('--cells', '-l', action='store_true',
-                        help='Output cells list')
     parser.add_argument('--html', '-m', action='store_true',
                         help='Output HTML')
     parser.add_argument('--csv', '-c', action='store_true',
@@ -115,6 +112,10 @@ def get_args():
                         help='Visualize output')
     parser.add_argument('--crop_padding', type=int, default=10,
                         help="The amount of padding to add around a detected table when cropping.")
+    parser.add_argument('--image_extension', default=".jpg",
+                        help="Extension with dot at the beginning.")
+    parser.add_argument('--output_image_extension', default=".jpg",
+                        help="Extension with dot at the beginning for output files.")
 
     return parser.parse_args()
 
@@ -131,19 +132,6 @@ def rescale_bboxes(out_bbox, size):
     b = box_cxcywh_to_xyxy(out_bbox)
     b = b * torch.tensor([img_w, img_h, img_w, img_h], dtype=torch.float32)
     return b
-
-
-def iob(bbox1, bbox2):
-    """
-    Compute the intersection area over box area, for bbox1.
-    """
-    intersection = Rect(bbox1).intersect(bbox2)
-    
-    bbox1_area = Rect(bbox1).get_area()
-    if bbox1_area > 0:
-        return intersection.get_area() / bbox1_area
-    
-    return 0
 
 
 def align_headers(headers, rows):
@@ -267,7 +255,7 @@ def objects_to_crops(img, tokens, objects, class_thresholds, padding=10):
 
         cropped_img = img.crop(bbox)
 
-        table_tokens = [token for token in tokens if iob(token['bbox'], bbox) >= 0.5]
+        table_tokens = [token for token in tokens if grits.iob(token['bbox'], bbox) >= 0.5]
         for token in table_tokens:
             token['bbox'] = [token['bbox'][0]-bbox[0],
                              token['bbox'][1]-bbox[1],
@@ -304,8 +292,8 @@ def objects_to_structures(objects, tokens, class_thresholds):
     table_structures = []
 
     for table in tables:
-        table_objects = [obj for obj in objects if iob(obj['bbox'], table['bbox']) >= 0.5]
-        table_tokens = [token for token in tokens if iob(token['bbox'], table['bbox']) >= 0.5]
+        table_objects = [obj for obj in objects if grits.iob(obj['bbox'], table['bbox']) >= 0.5]
+        table_tokens = [token for token in tokens if grits.iob(token['bbox'], table['bbox']) >= 0.5]
         
         structure = {}
 
@@ -322,7 +310,7 @@ def objects_to_structures(objects, tokens, class_thresholds):
         for obj in rows:
             obj['column header'] = False
             for header_obj in column_headers:
-                if iob(obj['bbox'], header_obj['bbox']) >= 0.5:
+                if grits.iob(obj['bbox'], header_obj['bbox']) >= 0.5:
                     obj['column header'] = True
 
         # Refine table structures
@@ -384,8 +372,7 @@ def structure_to_cells(table_structure, tokens):
             cell['subcell'] = False
             for spanning_cell in spanning_cells:
                 spanning_cell_rect = Rect(list(spanning_cell['bbox']))
-                if (spanning_cell_rect.intersect(cell_rect).get_area()
-                        / cell_rect.get_area()) > 0.5:
+                if grits.iob(cell_rect, spanning_cell_rect) > 0.5:
                     cell['subcell'] = True
                     break
 
@@ -405,9 +392,7 @@ def structure_to_cells(table_structure, tokens):
         header = True
         for subcell in subcells:
             subcell_rect = Rect(list(subcell['bbox']))
-            subcell_rect_area = subcell_rect.get_area()
-            if (subcell_rect.intersect(spanning_cell_rect).get_area()
-                    / subcell_rect_area) > 0.5:
+            if grits.iob(subcell_rect, spanning_cell_rect) > 0.5:
                 if cell_rect is None:
                     cell_rect = Rect(list(subcell['bbox']))
                 else:
@@ -502,10 +487,8 @@ def structure_to_cells(table_structure, tokens):
             row_rect.include_rect(list(rows[row_num]['bbox']))
         for column_num in cell['column_nums']:
             column_rect.include_rect(list(columns[column_num]['bbox']))
-        cell_rect = row_rect.intersect(column_rect)
-        if cell_rect.get_area() > 0:
-            cell['bbox'] = list(cell_rect)
-            pass
+        if row_rect.intersects(column_rect):
+            cell['bbox'] = list(row_rect & column_rect)
 
     return cells, confidence_score
 
@@ -514,7 +497,8 @@ def cells_to_csv(cells):
         num_columns = max([max(cell['column_nums']) for cell in cells]) + 1
         num_rows = max([max(cell['row_nums']) for cell in cells]) + 1
     else:
-        return
+        num_columns = 0
+        num_rows = 0
 
     header_cells = [cell for cell in cells if cell['column header']]
     if len(header_cells) > 0:
@@ -820,39 +804,39 @@ class TableExtractionPipeline(object):
         return extracted_tables
 
 
-def output_result(key, val, args, img, img_file):
+def output_result(key, val, args, img, img_file, image_extension, output_image_extension):
     if key == 'objects':
         if args.verbose:
             print(val)
-        out_file = img_file.replace(".jpg", "_objects.json")
+        out_file = img_file.replace(image_extension, "_objects.json")
         with open(os.path.join(args.out_dir, out_file), 'w') as f:
             json.dump(val, f)
         if args.visualize:
-            out_file = img_file.replace(".jpg", "_fig_tables.jpg")
+            out_file = img_file.replace(image_extension, "_fig_tables" + output_image_extension)
             out_path = os.path.join(args.out_dir, out_file)
             visualize_detected_tables(img, val, out_path)
     elif not key == 'image' and not key == 'tokens':
         for idx, elem in enumerate(val):
             if key == 'crops':
                 for idx, cropped_table in enumerate(val):
-                    out_img_file = img_file.replace(".jpg", "_table_{}.jpg".format(idx))
+                    out_img_file = img_file.replace(image_extension, "_table_{}".format(idx) + output_image_extension)
                     cropped_table['image'].save(os.path.join(args.out_dir,
                                                                 out_img_file))
-                    out_words_file = out_img_file.replace(".jpg", "_words.json")
+                    out_words_file = out_img_file.replace(image_extension, "_words.json")
                     with open(os.path.join(args.out_dir, out_words_file), 'w') as f:
                         json.dump(cropped_table['tokens'], f)
             elif key == 'cells':
-                out_file = img_file.replace(".jpg", "_{}_objects.json".format(idx))
+                out_file = img_file.replace(image_extension, "_{}_objects.json".format(idx))
                 with open(os.path.join(args.out_dir, out_file), 'w') as f:
                     json.dump(elem, f)
                 if args.verbose:
                     print(elem)
                 if args.visualize:
-                    out_file = img_file.replace(".jpg", "_fig_cells.jpg")
+                    out_file = img_file.replace(image_extension, "_fig_cells" + output_image_extension)
                     out_path = os.path.join(args.out_dir, out_file)
                     visualize_cells(img, elem, out_path)
             else:
-                out_file = img_file.replace(".jpg", "_{}.{}".format(idx, key))
+                out_file = img_file.replace(image_extension, "_{}.{}".format(idx, key))
                 with open(os.path.join(args.out_dir, out_file), 'w') as f:
                     f.write(elem)
                 if args.verbose:
@@ -879,16 +863,16 @@ def main():
     # Load images
     img_files = os.listdir(args.image_dir)
     num_files = len(img_files)
-    random.shuffle(img_files)
+    img_files = [img_files[x] for x in torch.randperm(len(img_files))]
 
     for count, img_file in enumerate(img_files):
         print("({}/{})".format(count+1, num_files))
         img_path = os.path.join(args.image_dir, img_file)
         img = Image.open(img_path)
-        print("Image loaded.")
+        print("Image loaded: {}".format(img_file))
 
         if not args.words_dir is None:
-            tokens_path = os.path.join(args.words_dir, img_file.replace(".jpg", "_words.json"))
+            tokens_path = os.path.join(args.words_dir, img_file.replace(args.image_extension, "_words.json"))
             with open(tokens_path, 'r') as f:
                 tokens = json.load(f)
 
@@ -915,14 +899,14 @@ def main():
             print("Table(s) recognized.")
 
             for key, val in extracted_table.items():
-                output_result(key, val, args, img, img_file)
+                output_result(key, val, args, img, img_file, args.image_extension, args.output_image_extension)
 
         if args.mode == 'detect':
             detected_tables = pipe.detect(img, tokens, out_objects=args.objects, out_crops=args.crops)
-            print("Table(s) detected.")
+            print("Table(s) detected: {}".format(detected_tables.keys()))
 
             for key, val in detected_tables.items():
-                output_result(key, val, args, img, img_file)
+                output_result(key, val, args, img, img_file, args.image_extension, args.output_image_extension)
 
         if args.mode == 'extract':
             extracted_tables = pipe.extract(img, tokens, out_objects=args.objects, out_cells=args.csv,
@@ -933,7 +917,7 @@ def main():
             for table_idx, extracted_table in enumerate(extracted_tables):
                 for key, val in extracted_table.items():
                     output_result(key, val, args, extracted_table['image'],
-                                  img_file.replace('.jpg', '_{}.jpg'.format(table_idx)))
+                                  img_file.replace(args.image_extension, '_{}'.format(table_idx) + args.image_extension), args.image_extension, args.output_image_extension)
 
 if __name__ == "__main__":
     main()

@@ -101,8 +101,9 @@ def iob(bbox1, bbox2):
     """
     Compute the intersection area over box area, for bbox1.
     """
-    intersection = Rect(bbox1).intersect(bbox2)
-    return intersection.get_area() / Rect(bbox1).get_area()
+    x = Rect(bbox1)
+    y = Rect(bbox2)
+    return (x & y).get_area() / x.get_area() if x.intersects(y) else 0
 
 
 def get_args():
@@ -110,6 +111,8 @@ def get_args():
 
     parser.add_argument('--pascal_data_dir',
                         help="Root directory for source data to process")
+    parser.add_argument('--data_output_dir',
+                        help="Root directory where to store data, e.g. data_directory + _PADDING_ + padding")
     parser.add_argument('--words_data_dir',
                         help="Root directory for source data to process")
     parser.add_argument('--split', default='',
@@ -129,24 +132,24 @@ def main():
     split = args.split
     padding = args.table_padding
 
-    data_output_directory = data_directory + "_PADDING_" + str(padding)
+    data_output_directory = args.data_output_dir
     words_output_directory = words_directory + "_PADDING_" + str(padding)
 
-    if not os.path.exists(data_output_directory):
+    if data_output_directory and not os.path.exists(data_output_directory):
         os.makedirs(data_output_directory)
 
     if not os.path.exists(words_output_directory):
         os.makedirs(words_output_directory)
 
     source_subdir = os.path.join(data_directory, split)
-    dest_subdir = os.path.join(data_output_directory, split)
+    dest_subdir = os.path.join(data_output_directory, split) if data_output_directory else None
     source_image_directory = os.path.join(data_directory, "images")
-    dest_image_directory = os.path.join(data_output_directory, "images")
+    dest_image_directory = os.path.join(data_output_directory, "images") if data_output_directory else None
 
-    if not os.path.exists(dest_subdir):
+    if dest_subdir and not os.path.exists(dest_subdir):
         os.makedirs(dest_subdir)
 
-    if not os.path.exists(dest_image_directory):
+    if dest_image_directory and not os.path.exists(dest_image_directory):
         os.makedirs(dest_image_directory)
 
     files = os.listdir(source_subdir)
@@ -163,7 +166,7 @@ def main():
 
         img = Image.open(image_filepath)
 
-        if not len(tables) == 1:
+        if len(tables) != 1:
             print('Problem')
 
         table_bbox = bboxes[tables[0]]
@@ -186,12 +189,14 @@ def main():
 
             # Add to PASCAl VOC
             element = create_pascal_voc_object_element(label, bbox)
-            annotation.append(element)  
+            annotation.append(element)
 
-        dest_img_path = os.path.join(dest_image_directory, filename)
-        img.save(dest_img_path)
-        dest_annot_path = os.path.join(dest_subdir, file)
-        save_xml_pascal_voc(annotation, dest_annot_path)
+        if dest_image_directory:
+            dest_img_path = os.path.join(dest_image_directory, filename)
+            img.save(dest_img_path)
+        if dest_subdir:
+            dest_annot_path = os.path.join(dest_subdir, file)
+            save_xml_pascal_voc(annotation, dest_annot_path)
 
         with open(words_filepath, 'r') as jf:
             data = json.load(jf)

@@ -4,6 +4,7 @@ Copyright (C) 2021 Microsoft Corporation
 from collections import defaultdict
 
 from fitz import Rect
+import grits
 
 
 def apply_threshold(objects, threshold):
@@ -29,33 +30,6 @@ def apply_class_thresholds(bboxes, labels, scores, class_names, class_thresholds
     labels = [labels[idx] for idx in indices_above_threshold]
 
     return bboxes, scores, labels
-
-
-def iou(bbox1, bbox2):
-    """
-    Compute the intersection-over-union of two bounding boxes.
-    """
-    intersection = Rect(bbox1).intersect(bbox2)
-    union = Rect(bbox1).include_rect(bbox2)
-    
-    union_area = union.get_area()
-    if union_area > 0:
-        return intersection.get_area() / union.get_area()
-    
-    return 0
-
-
-def iob(bbox1, bbox2):
-    """
-    Compute the intersection area over box area, for bbox1.
-    """
-    intersection = Rect(bbox1).intersect(bbox2)
-    
-    bbox1_area = Rect(bbox1).get_area()
-    if bbox1_area > 0:
-        return intersection.get_area() / bbox1_area
-    
-    return 0
 
 
 def objects_to_cells(table, objects_in_table, tokens_in_table, class_map, class_thresholds):
@@ -105,7 +79,9 @@ def objects_to_table_structures(table_object, objects_in_table, tokens_in_table,
     for obj in rows:
         obj['header'] = False
         for header_obj in headers:
-            if iob(obj['bbox'], header_obj['bbox']) >= 0.5:
+            if grits.iob(obj['bbox'], header_obj['bbox']) >= 0.5:
+                # Only useful if there are no rows or at most 1 column. Otherwise align_headers starts by
+                # setting it again to False for all rows.
                 obj['header'] = True
 
     for row in rows:
@@ -123,7 +99,7 @@ def objects_to_table_structures(table_object, objects_in_table, tokens_in_table,
     row_rect = Rect()
     for obj in rows:
         row_rect.include_rect(obj['bbox'])
-    column_rect = Rect() 
+    column_rect = Rect()
     for obj in columns:
         column_rect.include_rect(obj['bbox'])
     table_object['row_column_bbox'] = [column_rect[0], row_rect[1], column_rect[2], row_rect[3]]
@@ -193,12 +169,15 @@ def nms_by_containment(container_objects, package_objects, overlap_threshold=0.5
 
     for object2_num in range(1, num_objects):
         object2_packages = set(packages_by_container[object2_num])
+        # TODO: assert packages_by_container[object2_num] area already unique because
+        # each text box is only assigned at most once due to unique_assignment=True.
         if len(object2_packages) == 0:
             suppression[object2_num] = True
         for object1_num in range(object2_num):
             if not suppression[object1_num]:
                 object1_packages = set(packages_by_container[object1_num])
                 if len(object2_packages.intersection(object1_packages)) > 0:
+                    # TODO: assert False because unique_assignment=True
                     suppression[object2_num] = True
 
     final_objects = [obj for idx, obj in enumerate(container_objects) if not suppression[idx]]
@@ -218,25 +197,24 @@ def slot_into_containers(container_objects, package_objects, overlap_threshold=0
     if len(container_objects) == 0 or len(package_objects) == 0:
         return container_assignments, package_assignments, best_match_scores
 
-    match_scores = defaultdict(dict)
     for package_num, package in enumerate(package_objects):
         match_scores = []
         package_rect = Rect(package['bbox'])
-        package_area = package_rect.get_area()        
         for container_num, container in enumerate(container_objects):
             container_rect = Rect(container['bbox'])
-            intersect_area = container_rect.intersect(package['bbox']).get_area()
-            overlap_fraction = intersect_area / package_area
+            overlap_fraction = grits.iob(package_rect, container_rect)
             match_scores.append({'container': container, 'container_num': container_num, 'score': overlap_fraction})
 
         sorted_match_scores = sort_objects_by_score(match_scores)
 
         best_match_score = sorted_match_scores[0]
         best_match_scores.append(best_match_score['score'])
+        assert not forced_assignment
         if forced_assignment or best_match_score['score'] >= overlap_threshold:
             container_assignments[best_match_score['container_num']].append(package_num)
             package_assignments[package_num].append(best_match_score['container_num'])
 
+        assert unique_assignment
         if not unique_assignment: # slot package into all eligible slots
             for match_score in sorted_match_scores[1:]:
                 if match_score['score'] >= overlap_threshold:
@@ -268,8 +246,8 @@ def remove_objects_without_content(page_spans, objects):
         object_text, _ = extract_text_inside_bbox(page_spans, obj['bbox'])
         if len(object_text.strip()) == 0:
             objects.remove(obj)
-            
-            
+
+
 def extract_text_inside_bbox(spans, bbox):
     """
     Extract the text inside a bounding box.
@@ -297,11 +275,7 @@ def overlaps(bbox1, bbox2, threshold=0.5):
     """
     Test if more than "threshold" fraction of bbox1 overlaps with bbox2.
     """
-    rect1 = Rect(list(bbox1))
-    area1 = rect1.get_area()
-    if area1 == 0:
-        return False
-    return rect1.intersect(list(bbox2)).get_area()/area1 >= threshold
+    return grits.iob(bbox1, bbox2) >= threshold
 
 
 def extract_text_from_spans(spans, join_with_space=True, remove_integer_superscripts=True):
@@ -321,7 +295,7 @@ def extract_text_from_spans(spans, join_with_space=True, remove_integer_superscr
                 continue
             flags = span['flags']
             if flags & 2**0: # superscript flag
-                if is_int(span['text']):
+                if span['text'].isdigit():
                     spans_copy.remove(span)
                 else:
                     span['superscript'] = True
@@ -375,9 +349,8 @@ def align_columns(columns, bbox):
     table bounding box.
     """
     try:
-        for column in columns:
-            column['bbox'][1] = bbox[1]
-            column['bbox'][3] = bbox[3]
+        return [
+            {**column, **{'bbox': Rect(column['bbox'][0], bbox[1], column['bbox'][2], bbox[3])}} for column in columns]
     except Exception as err:
         print("Could not align columns: {}".format(err))
         pass
@@ -391,9 +364,7 @@ def align_rows(rows, bbox):
     table bounding box.
     """
     try:
-        for row in rows:
-            row['bbox'][0] = bbox[0]
-            row['bbox'][2] = bbox[2]
+        return [{**row, **{'bbox': Rect(bbox[0], row['bbox'][1], bbox[2], row['bbox'][3])}} for row in rows]
     except Exception as err:
         print("Could not align rows: {}".format(err))
         pass
@@ -467,7 +438,7 @@ def nms(objects, match_criteria="object2_overlap", match_threshold=0.05, keep_hi
             if not suppression[object1_num]:
                 object1_rect = Rect(objects[object1_num]['bbox'])
                 object1_area = object1_rect.get_area()
-                intersect_area = object1_rect.intersect(object2_rect).get_area()
+                intersect_area = object1_rect.intersect(object2_rect).get_area() if object1_rect.intersects(object2_rect) else 0
                 try:
                     if match_criteria=="object1_overlap":
                         metric = intersect_area / object1_area
@@ -493,7 +464,7 @@ def align_headers(headers, rows):
     For now, we are not supporting tables with multiple headers, so we need to
     eliminate anything besides the top-most header.
     """
-    
+
     aligned_headers = []
 
     for row in rows:
@@ -509,12 +480,34 @@ def align_headers(headers, rows):
             if overlap_height / row_height >= 0.5:
                 header_row_nums.append(row_num)
 
+    if len(set(header_row_nums)) != len(header_row_nums):
+        print("Previous code was containing duplicates in {}.".format(header_row_nums))
+
+    if sorted(header_row_nums) != header_row_nums:
+        print(
+            "Previous code was dealing with non-sorted header row numbers: {}.".format(
+                header_row_nums
+            )
+        )
+
+    # The previous code was only considering the first (detected) header.
+    # The headers have not been sorted by anything at this point so that was
+    # probably a bug.
+    header_row_nums = sorted(set(header_row_nums))
+
     if len(header_row_nums) == 0:
         return aligned_headers
 
-    header_rect = Rect()
     if header_row_nums[0] > 0:
-        header_row_nums = list(range(header_row_nums[0]+1)) + header_row_nums
+        print(
+            "Previous code was duplicating {} in {}.".format(
+                header_row_nums[0], header_row_nums
+            )
+        )
+
+    header_row_nums = list(range(header_row_nums[0])) + header_row_nums
+
+    header_rect = Rect()
 
     last_row_num = -1
     for row_num in header_row_nums:
@@ -612,12 +605,14 @@ def align_supercells(supercells, rows, columns):
         if col_bbox_rect is None:
             continue
 
-        supercell_bbox = list(row_bbox_rect.intersect(col_bbox_rect))
-        supercell['bbox'] = supercell_bbox
-
         # Only a true supercell if it joins across multiple rows or columns
         if (len(intersecting_rows) > 0 and len(intersecting_cols) > 0
                 and (len(intersecting_rows) > 1 or len(intersecting_cols) > 1)):
+            supercell_bbox = list(row_bbox_rect.intersect(col_bbox_rect))
+            # assert grits.is_valid_target_box(supercell_bbox), (
+            #     supercell_bbox, row_bbox_rect, col_bbox_rect)
+            supercell['bbox'] = supercell_bbox
+
             supercell['row_numbers'] = list(intersecting_rows)
             supercell['column_numbers'] = intersecting_cols
             aligned_supercells.append(supercell)
@@ -687,8 +682,8 @@ def header_supercell_tree(supercells):
             if not ancestors_by_row[row] == 1:
                 supercells.remove(header_supercell)
                 break
-                
-                
+
+
 def table_structure_to_cells(table_structures, table_spans, table_bbox):
     """
     Assuming the row, column, supercell, and header bounding boxes have
@@ -710,6 +705,7 @@ def table_structure_to_cells(table_structures, table_spans, table_bbox):
             column_rect = Rect(list(column['bbox']))
             row_rect = Rect(list(row['bbox']))
             cell_rect = row_rect.intersect(column_rect)
+            # assert grits.is_valid_target_box(cell_rect), (cell_rect, row_rect, column_rect)
             header = 'header' in row and row['header']
             cell = {'bbox': list(cell_rect), 'column_nums': [column_num], 'row_nums': [row_num],
                     'header': header}
@@ -717,8 +713,7 @@ def table_structure_to_cells(table_structures, table_spans, table_bbox):
             cell['subcell'] = False
             for supercell in supercells:
                 supercell_rect = Rect(list(supercell['bbox']))
-                if (supercell_rect.intersect(cell_rect).get_area()
-                        / cell_rect.get_area()) > 0.5:
+                if grits.iob(cell_rect, supercell_rect) > 0.5:
                     cell['subcell'] = True
                     break
 
@@ -738,9 +733,7 @@ def table_structure_to_cells(table_structures, table_spans, table_bbox):
         header = True
         for subcell in subcells:
             subcell_rect = Rect(list(subcell['bbox']))
-            subcell_rect_area = subcell_rect.get_area()
-            if (subcell_rect.intersect(supercell_rect).get_area()
-                    / subcell_rect_area) > 0.5:
+            if grits.iob(subcell_rect, supercell_rect) > 0.5:
                 if cell_rect is None:
                     cell_rect = Rect(list(subcell['bbox']))
                 else:
@@ -779,7 +772,12 @@ def table_structure_to_cells(table_structures, table_spans, table_bbox):
         for row_num in cell['row_nums']:
             row_rect.include_rect(list(dilated_rows[row_num]['bbox']))
         cell_rect = column_rect.intersect(row_rect)
+        # assert grits.is_valid_target_box(cell_rect)
         cell['bbox'] = list(cell_rect)
+
+    # In cells we have the simple cells before the supercells' cells. Due to
+    # the sorting by cell being a stable sort, if both a cell and a supercell match
+    # a text span equally well, then the simple cell seems to win.
 
     span_nums_by_cell, _, _ = slot_into_containers(cells, table_spans, overlap_threshold=0.001,
                                                unique_assignment=True, forced_assignment=False)
@@ -787,15 +785,19 @@ def table_structure_to_cells(table_structures, table_spans, table_bbox):
     for cell, cell_span_nums in zip(cells, span_nums_by_cell):
         cell_spans = [table_spans[num] for num in cell_span_nums]
         # TODO: Refine how text is extracted; should be character-based, not span-based;
-        # but need to associate 
+        # but need to associate
         cell['cell_text'] = extract_text_from_spans(cell_spans, remove_integer_superscripts=False)
         cell['spans'] = cell_spans
         
     # Adjust the row, column, and cell bounding boxes to reflect the extracted text
     num_rows = len(rows)
     rows = sort_objects_top_to_bottom(rows)
+    row_bboxes = [Rect(row['bbox']) for row in rows]
+    del rows
     num_columns = len(columns)
     columns = sort_objects_left_to_right(columns)
+    column_bboxes = [Rect(column['bbox']) for column in columns]
+    del columns
     min_y_values_by_row = defaultdict(list)
     max_y_values_by_row = defaultdict(list)
     min_x_values_by_column = defaultdict(list)
@@ -810,35 +812,33 @@ def table_structure_to_cells(table_structures, table_spans, table_bbox):
             min_y_values_by_row[min_row].append(span['bbox'][1])
             max_x_values_by_column[max_column].append(span['bbox'][2])
             max_y_values_by_row[max_row].append(span['bbox'][3])
-    for row_num, row in enumerate(rows):
+    for row_num, row_bbox in enumerate(row_bboxes):
         if len(min_x_values_by_column[0]) > 0:
-            row['bbox'][0] = min(min_x_values_by_column[0])
+            row_bbox[0] = min(min_x_values_by_column[0])
         if len(min_y_values_by_row[row_num]) > 0:
-            row['bbox'][1] = min(min_y_values_by_row[row_num])
+            row_bbox[1] = min(min_y_values_by_row[row_num])
         if len(max_x_values_by_column[num_columns-1]) > 0:
-            row['bbox'][2] = max(max_x_values_by_column[num_columns-1])
+            row_bbox[2] = max(max_x_values_by_column[num_columns-1])
         if len(max_y_values_by_row[row_num]) > 0:
-            row['bbox'][3] = max(max_y_values_by_row[row_num])
-    for column_num, column in enumerate(columns):
+            row_bbox[3] = max(max_y_values_by_row[row_num])
+    for column_num, column_bbox in enumerate(column_bboxes):
         if len(min_x_values_by_column[column_num]) > 0:
-            column['bbox'][0] = min(min_x_values_by_column[column_num])
+            column_bbox[0] = min(min_x_values_by_column[column_num])
         if len(min_y_values_by_row[0]) > 0:
-            column['bbox'][1] = min(min_y_values_by_row[0])
+            column_bbox[1] = min(min_y_values_by_row[0])
         if len(max_x_values_by_column[column_num]) > 0:
-            column['bbox'][2] = max(max_x_values_by_column[column_num])
+            column_bbox[2] = max(max_x_values_by_column[column_num])
         if len(max_y_values_by_row[num_rows-1]) > 0:
-            column['bbox'][3] = max(max_y_values_by_row[num_rows-1])
+            column_bbox[3] = max(max_y_values_by_row[num_rows-1])
     for cell in cells:
         row_rect = Rect()
         column_rect = Rect()
         for row_num in cell['row_nums']:
-            row_rect.include_rect(list(rows[row_num]['bbox']))
+            row_rect.include_rect(list(row_bboxes[row_num]))
         for column_num in cell['column_nums']:
-            column_rect.include_rect(list(columns[column_num]['bbox']))
-        cell_rect = row_rect.intersect(column_rect)
-        if cell_rect.get_area() > 0:
-            cell['bbox'] = list(cell_rect)
-            pass
+            column_rect.include_rect(list(column_bboxes[column_num]))
+        if row_rect.intersects(column_rect):
+            cell['bbox'] = list(row_rect & column_rect)
 
     return cells, confidence_score
 
@@ -862,6 +862,10 @@ def remove_supercell_overlap(supercell1, supercell2):
 
     # While the supercells have overlapping grid cells, continue shrinking the less-confident
     # supercell one row or one column at a time
+    #
+    # Warning: In case of same-confidence level, it is ordering-dependent
+    # whether a supercell is dropped or not, depending on the order in which the
+    # previous supercells have been visited.
     while len(common_rows) > 0 and len(common_columns) > 0:
         # Try to shrink the supercell as little as possible to remove the overlap;
         # if the supercell has fewer rows than columns, remove an overlapping column,

@@ -1,0 +1,29 @@
+name: tatr
+channels:
+  - conda-forge
+  - pytorch
+  - defaults
+dependencies:
+  - python
+  - pytorch
+  - cudatoolkit
+  - cython
+  - torchvision
+  - pandas
+  - scikit-learn
+  - tqdm
+  - matplotlib
+  - numpy
+  - pycocotools
+  - pillow
+  - editdistance
+  - scikit-image
+  - scipy
+  - seaborn
+  - colorcet
+  - pip
+  - pip:
+      - PyMuPDF
+      - datadiff
+      - enum-actions
+  - huggingface_hub
