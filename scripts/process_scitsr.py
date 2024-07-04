@@ -1432,7 +1432,7 @@ def main():
 
     n = len(train_filepaths)
     print(n)
-    order = np.random.permutation(n)
+    order = torch.randperm(n).numpy()
     split_point = int(n * 0.875)
     for idx in order[:split_point]:
         splits_by_filepath[train_filepaths[idx]] = 'train'

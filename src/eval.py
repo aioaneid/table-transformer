@@ -9,16 +9,18 @@ import statistics as stat
 from datetime import datetime
 import multiprocessing
 from itertools import repeat
-from functools import partial
-import tqdm
 import math
+import re
+import errno
+import pathlib
+import pprint
+import time
 
 import torch
 from torchvision import transforms
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from fitz import Rect
 from PIL import Image
 
 sys.path.append("../detr")
@@ -60,7 +62,7 @@ def objects_to_cells(bboxes, labels, scores, page_tokens, structure_class_names,
     for bbox, score, label in zip(bboxes, scores, labels):
         table_objects.append({'bbox': bbox, 'score': score, 'label': label})
         
-    table = {'objects': table_objects, 'page_num': 0} 
+    table = {'objects': table_objects, 'page_num': 0}
     
     table_class_objects = [obj for obj in table_objects if obj['label'] == structure_class_map['table']]
     if len(table_class_objects) > 1:
@@ -70,7 +72,7 @@ def objects_to_cells(bboxes, labels, scores, page_tokens, structure_class_names,
     except:
         table_bbox = (0,0,1000,1000)
     
-    tokens_in_table = [token for token in page_tokens if postprocess.iob(token['bbox'], table_bbox) >= 0.5]
+    tokens_in_table = [token for token in page_tokens if grits.iob(token['bbox'], table_bbox) >= 0.5]
     
     # Determine the table cell structure from the objects
     table_structures, cells, confidence_score = postprocess.objects_to_cells(table, table_objects, tokens_in_table,
@@ -264,7 +266,8 @@ def dar_con_new(true_cells, pred_cells):
 
 
 def compute_metrics(mode, true_bboxes, true_labels, true_scores, true_cells,
-                    pred_bboxes, pred_labels, pred_scores, pred_cells):
+                    pred_bboxes, pred_labels, pred_scores, pred_cells,
+                    *, fast_grits, debug_grits):
     """
     Compute the collection of table structure recognition metrics given
     the ground truth and predictions as input.
@@ -274,6 +277,8 @@ def compute_metrics(mode, true_bboxes, true_labels, true_scores, true_cells,
       ground truth bounding boxes the model is trained on.
     - Otherwise, only true_cells and pred_cells are needed.
     """
+    # for true_cell in true_cells:
+    #     assert grits.is_valid_target_box(true_cell['bbox']), true_cell['bbox']
     metrics = {}
 
     # Compute grids/matrices for comparison
@@ -289,24 +294,30 @@ def compute_metrics(mode, true_bboxes, true_labels, true_scores, true_cells,
      metrics['grits_precision_top'],
      metrics['grits_recall_top'],
      metrics['grits_top_upper_bound']) = grits_top(true_relspan_grid,
-                                                   pred_relspan_grid)
+                                                   pred_relspan_grid,
+                                                   fast_grits=fast_grits)
 
     # Compute GriTS_Loc (location)
     (metrics['grits_loc'],
      metrics['grits_precision_loc'],
      metrics['grits_recall_loc'],
      metrics['grits_loc_upper_bound']) = grits_loc(true_bbox_grid,
-                                                   pred_bbox_grid)
+                                                   pred_bbox_grid,
+                                                   fast_grits=fast_grits)
 
     # Compute GriTS_Con (text content)
     (metrics['grits_con'],
      metrics['grits_precision_con'],
      metrics['grits_recall_con'],
      metrics['grits_con_upper_bound']) = grits_con(true_text_grid,
-                                                   pred_text_grid)
+                                                   pred_text_grid,
+                                                   fast_grits=fast_grits)
 
     # Compute content accuracy
     metrics['acc_con'] = int(metrics['grits_con'] == 1)
+
+    if debug_grits:
+        pprint.pprint(metrics)
 
     if mode == 'grits-all':
         # Compute grids/matrices for comparison
@@ -453,30 +464,48 @@ def print_metrics_summary(metrics_summary, all=False):
         print('-' * 50)
 
 
-def eval_tsr_sample(target, pred_logits, pred_bboxes, mode):
+def eval_tsr_sample(target, pred_logits, pred_bboxes, mode, fast_grits, debug_grits):
     true_img_size = list(reversed(target['orig_size'].tolist()))
     true_bboxes = target['boxes']
-    true_bboxes = [elem.tolist() for elem in rescale_bboxes(true_bboxes, true_img_size)]
-    true_labels = target['labels'].tolist()
+    # Targets are numpy arrays, but call tolist just in case.
+    true_bboxes = [tuple(elem.tolist()) for elem in rescale_bboxes(true_bboxes, true_img_size)]
+    # for true_bbox in true_bboxes:
+    #     assert grits.is_valid_target_box(true_bbox), (true_bbox, target)
+    true_labels = tuple(target['labels'])
     true_scores = [1 for elem in true_labels]
     img_words_filepath = target["img_words_path"]
     with open(img_words_filepath, 'r') as f:
         true_page_tokens = json.load(f)
+    if debug_grits:
+        print("img_words_filepath: {}".format(img_words_filepath))
 
     true_table_structures, true_cells, _ = objects_to_cells(true_bboxes, true_labels, true_scores,
                                                             true_page_tokens, structure_class_names,
                                                             structure_class_thresholds, structure_class_map)
+    if debug_grits:
+        print("true_table_structures: {}".format(pprint.pformat(true_table_structures)))
+        print("true_cells: {}".format(pprint.pformat(true_cells)))
+    # for true_bbox in true_bboxes:
+    #     assert grits.is_valid_target_box(true_bbox), (true_bbox, target)
 
     m = pred_logits.softmax(-1).max(-1)
     pred_labels = list(m.indices.detach().cpu().numpy())
     pred_scores = list(m.values.detach().cpu().numpy())
-    pred_bboxes = [elem.tolist() for elem in rescale_bboxes(pred_bboxes, true_img_size)]
-    _, pred_cells, _ = objects_to_cells(pred_bboxes, pred_labels, pred_scores,
+    # Predicted boxes are tensors so make them lists first.
+    pred_bboxes = [tuple(elem.tolist()) for elem in rescale_bboxes(pred_bboxes, true_img_size)]
+    # for pred_bbox in pred_bboxes:
+    #     assert grits.is_valid_box(pred_bbox), (pred_bbox, target)
+    pred_table_structures, pred_cells, _ = objects_to_cells(pred_bboxes, pred_labels, pred_scores,
                                         true_page_tokens, structure_class_names,
                                         structure_class_thresholds, structure_class_map)
+    if debug_grits:
+        print("pred_table_structures: {}".format(pprint.pformat(pred_table_structures)))
+        print("pred_cells: {}".format(pprint.pformat(pred_cells)))
 
     metrics = compute_metrics(mode, true_bboxes, true_labels, true_scores, true_cells,
-                                pred_bboxes, pred_labels, pred_scores, pred_cells)
+                                pred_bboxes, pred_labels, pred_scores, pred_cells,
+                                fast_grits=fast_grits,
+                                debug_grits=debug_grits)
     statistics = compute_statistics(true_table_structures, true_cells)
 
     metrics.update(statistics)
@@ -487,9 +516,12 @@ def eval_tsr_sample(target, pred_logits, pred_bboxes, mode):
 
 def visualize(args, target, pred_logits, pred_bboxes):
     img_filepath = target["img_path"]
+    if not re.compile(args.debug_img_path_re_filter).fullmatch(img_filepath):
+        return
     img_filename = img_filepath.split("/")[-1]
 
-    bboxes_out_filename = img_filename.replace(".jpg", "_bboxes.jpg")
+    # bboxes_out_filename = img_filename.replace(".jpg", "_bboxes.jpg")
+    bboxes_out_filename = re.sub(r"\.[^.]*$", ".jpg", img_filename)
     bboxes_out_filepath = os.path.join(args.debug_save_dir, bboxes_out_filename)
 
     img = Image.open(img_filepath)
@@ -563,7 +595,7 @@ def visualize(args, target, pred_logits, pred_bboxes):
             ax.add_patch(rect)
             rect = patches.Rectangle(bbox[:2], bbox[2]-bbox[0], bbox[3]-bbox[1], linewidth=1, 
                                     edgecolor="magenta",facecolor='none',linestyle="--")
-            ax.add_patch(rect) 
+            ax.add_patch(rect)
 
         fig.set_size_inches((15, 15))
         plt.axis('off')
@@ -571,9 +603,20 @@ def visualize(args, target, pred_logits, pred_bboxes):
 
     plt.close('all')
 
+def wait_if_necessary(wait_file_path, wait_file_wait_seconds):
+    if not wait_file_path:
+        return
+    waited = False
+    while wait_file_path.exists():
+        print(".", end="", flush=True)
+        time.sleep(wait_file_wait_seconds)
+        waited = True
+    if waited:
+        print()
 
 @torch.no_grad()
-def evaluate(args, model, criterion, postprocessors, data_loader, base_ds, device):
+def evaluate(args, model, criterion, postprocessors, data_loader, base_ds, device,
+    *, debug_samples, debug_losses):
     st_time = datetime.now()
     model.eval()
     criterion.eval()
@@ -590,13 +633,16 @@ def evaluate(args, model, criterion, postprocessors, data_loader, base_ds, devic
         pred_logits_collection = []
         pred_bboxes_collection = []
         targets_collection = []
-        
+    
     num_batches = len(data_loader)
     print_every = max(args.eval_step, int(math.ceil(num_batches / 100)))
     batch_num = 0
 
     for samples, targets in metric_logger.log_every(data_loader, print_every, header):
+        wait_if_necessary(args.wait_file_path, 10)
         batch_num += 1
+        if debug_samples:
+            print("samples: {}".format(samples))
         samples = samples.to(device)
         for t in targets:
             for k, v in t.items():
@@ -604,6 +650,8 @@ def evaluate(args, model, criterion, postprocessors, data_loader, base_ds, devic
                     t[k] = v.to(device)
 
         outputs = model(samples)
+        if debug_losses:
+            print('outputs: {}'.format(outputs))
 
         if args.debug:
             for target, pred_logits, pred_boxes in zip(targets, outputs['pred_logits'], outputs['pred_boxes']):
@@ -611,6 +659,8 @@ def evaluate(args, model, criterion, postprocessors, data_loader, base_ds, devic
 
         loss_dict = criterion(outputs, targets)
         weight_dict = criterion.weight_dict
+        if debug_losses:
+            print("loss_dict: {} weight_dict: {}".format(loss_dict, weight_dict))
 
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = utils.reduce_dict(loss_dict)
@@ -618,7 +668,10 @@ def evaluate(args, model, criterion, postprocessors, data_loader, base_ds, devic
                                     for k, v in loss_dict_reduced.items() if k in weight_dict}
         loss_dict_reduced_unscaled = {f'{k}_unscaled': v
                                       for k, v in loss_dict_reduced.items()}
-        metric_logger.update(loss=sum(loss_dict_reduced_scaled.values()),
+        losses = sum(loss_dict_reduced_scaled.values())
+        if debug_losses:
+            print("losses: {}".format(losses))
+        metric_logger.update(loss=losses,
                              **loss_dict_reduced_scaled,
                              **loss_dict_reduced_unscaled)
         metric_logger.update(class_error=loss_dict_reduced['class_error'])
@@ -626,8 +679,9 @@ def evaluate(args, model, criterion, postprocessors, data_loader, base_ds, devic
         orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
         results = postprocessors['bbox'](outputs, orig_target_sizes)
         res = {target['image_id'].item(): output for target, output in zip(targets, results)}
-        if coco_evaluator is not None:
-            coco_evaluator.update(res)
+        if debug_losses:
+            print("Coco evaluator predictions: {}".format(res))
+        coco_evaluator.update(res)
 
         if args.data_type == "structure":
             pred_logits_collection += list(outputs['pred_logits'].detach().cpu())
@@ -645,9 +699,12 @@ def evaluate(args, model, criterion, postprocessors, data_loader, base_ds, devic
 
             if batch_num % args.eval_step == 0 or batch_num == num_batches:
                 arguments = zip(targets_collection, pred_logits_collection, pred_bboxes_collection,
-                                repeat(args.mode))
-                with multiprocessing.Pool(args.eval_pool_size) as pool:
-                    metrics = pool.starmap_async(eval_tsr_sample, arguments).get()
+                                repeat(args.mode), repeat(args.fast_grits), repeat(args.debug_grits))
+                if args.eval_pool_size:
+                    metrics = [eval_tsr_sample(*argument_tuple) for argument_tuple in arguments]
+                else:
+                    with multiprocessing.get_context('spawn').Pool(args.eval_pool_size) as pool:
+                        metrics = pool.starmap_async(eval_tsr_sample, arguments).get()
                 tsr_metrics += metrics
                 pred_logits_collection = []
                 pred_bboxes_collection = []
@@ -655,23 +712,37 @@ def evaluate(args, model, criterion, postprocessors, data_loader, base_ds, devic
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
+    # Prints median (global_avg), see detr/util/misc.py.
+    # class_error_unscaled is (1 - precision@1) * 100.
+    
     print("Averaged stats:", metric_logger)
-    if coco_evaluator is not None:
-        coco_evaluator.synchronize_between_processes()
 
-    # accumulate predictions from all images
-    if coco_evaluator is not None:
+    if num_batches:
+        coco_evaluator.synchronize_between_processes()
+        # accumulate predictions from all images
         coco_evaluator.accumulate()
         coco_evaluator.summarize()
+
     stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-    if coco_evaluator is not None:
+    if num_batches:
         if 'bbox' in postprocessors.keys():
             stats['coco_eval_bbox'] = coco_evaluator.coco_eval['bbox'].stats.tolist()
+        if args.coco_eval_prefix:
+            try:
+                os.makedirs(os.path.dirname(args.coco_eval_prefix))
+            except OSError as exc: # Guard against race condition
+                if exc.errno != errno.EEXIST:
+                    raise
+            for k, v in coco_evaluator.coco_eval.items():
+                torch.save(v.eval, "{}_{}.pt".format(args.coco_eval_prefix, k))
 
     if args.data_type == "structure":
         # Save sample-level metrics for more analysis
         if len(args.metrics_save_filepath) > 0:
-            with open(args.metrics_save_filepath, 'w') as outfile:
+            metrics_path = pathlib.Path(args.metrics_save_filepath)
+            print("Writing metrics to: {}".format(metrics_path))
+            metrics_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(metrics_path, 'w') as outfile:
                 json.dump(tsr_metrics, outfile)
 
         # Compute metrics averaged over all samples
@@ -684,15 +755,24 @@ def evaluate(args, model, criterion, postprocessors, data_loader, base_ds, devic
 
     return stats, coco_evaluator
 
-
-def eval_coco(args, model, criterion, postprocessors, data_loader_test, dataset_test, device):
+def eval_coco(args, model, criterion, postprocessors, data_loader_test, dataset_test, device,
+              *, debug_samples, debug_losses):
     """
     Use this function to do COCO evaluation. Default implementation runs it on
     the test set.
     """
-    pubmed_stats, coco_evaluator = evaluate(args, model, criterion, postprocessors,
+    pubmed_stats, _ = evaluate(args, model, criterion, postprocessors,
                                             data_loader_test, dataset_test,
-                                            device)
-    print("COCO metrics summary: AP50: {:.3f}, AP75: {:.3f}, AP: {:.3f}, AR: {:.3f}".format(
-        pubmed_stats['coco_eval_bbox'][1], pubmed_stats['coco_eval_bbox'][2],
-        pubmed_stats['coco_eval_bbox'][0], pubmed_stats['coco_eval_bbox'][8]))
+                                            device, debug_samples=debug_samples,
+                                            debug_losses=debug_losses)
+    coco_eval_bbox_stats = pubmed_stats.get('coco_eval_bbox')
+    if coco_eval_bbox_stats:
+        print("COCO metrics summary: AP50: {:.3f}, AP75: {:.3f}, AP: {:.3f}, AR: {:.3f}".format(
+            coco_eval_bbox_stats[1], coco_eval_bbox_stats[2],
+            coco_eval_bbox_stats[0], coco_eval_bbox_stats[8]))
+
+def eval_cocos(args, model, criterion, postprocessors, dataset_test_loaders, device,
+               *, debug_samples, debug_losses):
+    for dataset_test, data_loader_test in dataset_test_loaders:
+        eval_coco(args, model, criterion, postprocessors, data_loader_test, dataset_test, device,
+                  debug_samples=debug_samples, debug_losses=debug_losses)

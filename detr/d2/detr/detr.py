@@ -94,6 +94,7 @@ class Detr(nn.Module):
         l1_weight = cfg.MODEL.DETR.L1_WEIGHT
         deep_supervision = cfg.MODEL.DETR.DEEP_SUPERVISION
         no_object_weight = cfg.MODEL.DETR.NO_OBJECT_WEIGHT
+        enable_bounds = cfg.MODEL.DETR.ENABLE_BOUNDS
 
         N_steps = hidden_dim // 2
         d2_backbone = MaskedBackbone(cfg)
@@ -147,6 +148,7 @@ class Detr(nn.Module):
             losses += ["masks"]
         self.criterion = SetCriterion(
             self.num_classes, matcher=matcher, weight_dict=weight_dict, eos_coef=no_object_weight, losses=losses,
+            enable_bounds=self.enable_bounds
         )
         self.criterion.to(self.device)
 

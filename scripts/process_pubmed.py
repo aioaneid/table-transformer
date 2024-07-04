@@ -128,7 +128,7 @@ def overlaps(bbox1, bbox2, threshold=0.5):
     """
     rect1 = Rect(bbox1)
     area1 = rect1.get_area()
-    if area1 == 0:
+    if area1 == 0 or not rect1.intersects(bbox2):
         return False
     return rect1.intersect(bbox2).get_area()/area1 >= threshold
 
@@ -160,7 +160,7 @@ def extract_text_from_spans(spans, join_with_space=True, remove_integer_superscr
         for span in spans:
             flags = span['flags']
             if flags & 2**0: # superscript flag
-                if is_int(span['text']):
+                if span['text'].isdigit():
                     spans_copy.remove(span)
                 else:
                     span['superscript'] = True
@@ -1046,8 +1046,9 @@ def iob(bbox1, bbox2):
     """
     Compute the intersection area over box area, for bbox1.
     """
-    intersection = Rect(bbox1).intersect(bbox2)
-    return intersection.get_area() / Rect(bbox1).get_area()
+    x = Rect(bbox1)
+    y = Rect(bbox2)
+    return (x & y).get_area() / x.get_area() if x.intersects(y) else 0
 
 
 def create_document_page_image(doc, page_num, output_image_max_dim=1000):
