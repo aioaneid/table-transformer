@@ -28,6 +28,8 @@ The available list of scripts is described below. Note that only those using pyt
   - [make-structure-pxct-dataset.sh](./make-structure-pxct-dataset): Makes the table outer border identical to the original table bounding box. Makes a complete training dataset, including without relaxation those tables with spanning cells which get dropped in the cell matrix extraction step.
   - [train-structure-pxct.sh](./train-structure-pxct.sh): Trains a TSR model on the constrained box relaxation dataset.
 
+Note that just like with TATR v1.1, the TSR eval should be performed on table images with very little padding as created by [create_padded_dataset.py](./scripts/create_padded_dataset.py).
+
 The GriTS evaluation code can be executed in parallel on different batches of images, e.g.:
 
 ```sh
