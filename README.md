@@ -40,3 +40,30 @@ conda run --no-capture-output --live-stream -n tatr python src/main.py --data_ty
 The metrics batches for an arbitrary epoch can then be merged together using [plots/aggregate_json_grits.py](./plots/aggregate_json_grits.py).
 
 Note that the training scripts allow a new `--mode` option `validate` which can be executed in a subsequent phase to training.
+
+## Performance Metrics
+
+### Training for Table Detection with a subset of the tables
+
+| Model                      | Cardinality Error | AP     | AR     |
+|----------------------------|-------------|--------|--------|
+| All images, all tables         | 0.0018      | **0.9800** | **0.9900** |
+| Only images with exactly one object (*table* or *table rotated*)           | *0.1050*    | *0.8700*  | *0.8870*  |
+| All images, one randomly-selected object (*table* or *table rotated*) per image             | 0.0186      | 0.9770   | 0.9880   |
+| All images, all objects counted split by category (*table* or *table rotated*), one randomly-selected object per image has a bounding box            | 0.0018      | 0.9730   | 0.9880   |
+| All images, all objects with hole and outer bounding boxes each relaxed by 2 pixels. TATR v1.1 cropping around the outer border     | 0.0018      | **0.9800** | **0.9900** |
+| All images, all objects with hole and outer bounding boxes each relaxed symetrically by (up to) 4 pixels. TATR v1.1 cropping around original bounding box   | 0.0016      | 0.9790   | **0.9900** |
+| All images, all objects with hole and outer bounding boxes each relaxed symetrically by (up to) 8 pixels. TATR v1.1 cropping around original bounding box   | **0.0014**  | 0.9760   | 0.9850   |
+
+### Training for Table Structure Recognition with Box Relaxation
+
+| Model                          | Tables  | Acc<sub>Con</sub> | GriTS<sub>Con</sub> | GriTS<sub>Loc</sub> | GriTS<sub>Top</sub> | Epochs |
+|--------------------------------|---------|-------------|---------------|---------------|---------------|--------|
+| TATR v1.0                      | All     | 0.8243      | 0.9850        | 0.9786        | 0.9849        | 20     |
+| TATR v1.1                      | All     | 0.8326      | 0.9862        | 0.9797        | 0.9851        | 28.5   |
+| TATR v1.1 with bug fixes       | All     | 0.8433      | 0.9862        | 0.9806        | 0.9858        | 28     |
+| Constrained box relaxation     | All     | **0.8458**  | **0.9866**    | **0.9811**    | **0.9861**    | 28     |
+| TATR v1.1 with bug fixes       | Simple  | 0.9661      | 0.9947        | 0.9934        | 0.9953        | 28     |
+| Constrained box relaxation     | Simple  | **0.9667**  | **0.9954**    | **0.9941**    | **0.9960**    | 28     |
+| TATR v1.1 with bug fixes       | Complex | 0.7324      | 0.9786        | 0.9693        | **0.9774**    | 28     |
+| Constrained box relaxation     | Complex | **0.7363**  | **0.9789**    | **0.9697**    | 0.9773        | 28     |
