@@ -7,6 +7,7 @@ import argparse
 import os
 import numpy as np
 import sys
+import itertools
 from PIL import Image
 from matplotlib import pyplot as plt
 import cross_box_plots
@@ -14,31 +15,53 @@ import cross_box_plots
 sys.path.append("src")
 import table_datasets
 
-def main(input_structure_pascal_voc_xml, input_image_dir, output_image_dir):
+
+def main(
+    input_structure_pascal_voc_xml,
+    input_image_dir,
+    input_image_extension,
+    scale: bool,
+    output_image_dir,
+):
     os.makedirs(output_image_dir, exist_ok=True)
-    pairs = table_datasets.read_label_box_pairs_from_pascal_voc(
+    xml_size, pairs = table_datasets.read_size_and_label_box_pairs_from_pascal_voc(
         input_structure_pascal_voc_xml
     )
     pairs = table_datasets.convert_label_box_pairs_to_bounds(pairs)
     print(pairs)
     image_path = input_image_dir.joinpath(
-        input_structure_pascal_voc_xml.name.replace(".xml", ".jpg")
+        input_structure_pascal_voc_xml.name.replace(
+            ".xml", ".{}".format(input_image_extension)
+        )
     )
     img = Image.open(image_path)
-    print(img.size)
+    print("Image:", image_path, "ImageSize:", img.size, "XmlSize:", xml_size)
     w, h = img.size
+    dpi = 300
+    figsize = (w / dpi, w / dpi)
 
     for i, (label, bounds) in enumerate(pairs):
-        ax = plt.gca()
+        _, ax = plt.subplots(figsize=figsize, dpi=dpi)
         ax.imshow(img, interpolation="lanczos")
         plt.axis("off")
         assert len(bounds) == 8
-        hole_border = torch.tensor(bounds[:4])
-        outer_border = torch.tensor(bounds[4:])
+        t = torch.tensor(bounds)
+        if scale:
+            t[0::2] *= w / xml_size[0]
+            t[1::2] *= h / xml_size[1]
+        hole_border = t[:4]
+        outer_border = t[4:]
         border_boxes = cross_box_plots.compute_border_boxes(
             outer_border, hole_border, (0, w), (0, h)
         )
-        rectangles = cross_box_plots.border_box_rectangles(border_boxes, False)
+        rectangles = cross_box_plots.border_box_rectangles(
+            border_boxes,
+            False,
+            edge_colors=[
+                "crimson",
+            ]
+            + ["navy"] * (len(border_boxes) - 1),
+        )
         for rectangle in rectangles:
             rectangle.set(zorder=1)
             ax.add_patch(rectangle)
@@ -71,9 +94,19 @@ if __name__ == "__main__":
         help="Where to find the images.",
     )
     parser.add_argument(
+        "--input_image_extension",
+        type=str,
+        default="jpg",
+    )
+    parser.add_argument(
         "--output_image_dir",
         type=pathlib.PurePath,
         help="Where to output whole image annotated structure images.",
+    )
+    parser.add_argument(
+        "--scale",
+        action="store_true",
+        help="Scale the xml bounds to the actual image size.",
     )
     parser.add_argument(
         "--print0",
@@ -85,7 +118,11 @@ if __name__ == "__main__":
     print("Images: {}".format(len(args.input_structure_pascal_voc_xml)), flush=True)
     for input_structure_pascal_voc_xml in args.input_structure_pascal_voc_xml:
         main(
-            input_structure_pascal_voc_xml, args.input_image_dir, args.output_image_dir
+            input_structure_pascal_voc_xml,
+            args.input_image_dir,
+            args.input_image_extension,
+            args.scale,
+            args.output_image_dir,
         )
         if args.print0:
             print("\x00", flush=True)

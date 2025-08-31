@@ -744,7 +744,7 @@ def main():
     # Check for debug mode
     if args.mode == "eval" and args.debug:
         print(
-            "Running evaluation/inference in DEBUG mode, processing will take longer. Saving output to: {}.".format(
+            "Running evaluation/inference in DEBUG mode, processing will take longer. Saving output to: {}".format(
                 args.debug_save_dir
             )
         )

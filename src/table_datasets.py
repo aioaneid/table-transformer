@@ -64,7 +64,7 @@ def read_label_elements_box_triples_from_root(root):
     pairs = []
     for object_ in root.iter('object'):
         ymin, xmin, ymax, xmax = None, None, None, None
-        
+
         label = object_.find("name").text
 
         for box in object_.findall("bndbox"):
@@ -81,12 +81,20 @@ def read_label_box_pairs_from_pascal_voc(xml_file: str):
     tree = ET.parse(xml_file)
     return read_label_elements_box_triples_from_root(tree.getroot())
 
+def read_size_and_label_box_pairs_from_pascal_voc(xml_file: str):
+    tree = ET.parse(xml_file)
+    root = tree.getroot()
+    for sz in root.iter('size'):
+        w = int(sz.find("width").text)
+        h = int(sz.find("height").text)
+    return (w, h), read_label_elements_box_triples_from_root(root)
+
 def read_pascal_voc(xml_file: str, class_map, enable_bounds):
     pairs = read_label_box_pairs_from_pascal_voc(xml_file)
-        
+
     if enable_bounds:
         pairs = convert_label_box_pairs_to_bounds(pairs)
-        
+
     bboxes = []
     labels = []
     for label, bbox in pairs:
@@ -172,7 +180,7 @@ class RandomCrop(object):
                 if bbox[0] < bbox[2] and bbox[1] < bbox[3]:
                     cropped_bboxes.append(bbox)
                     cropped_labels.append(label)
-                         
+
             if len(cropped_bboxes) > 0:
                 target["boxes"] = torch.as_tensor(cropped_bboxes, dtype=torch.float32).reshape(-1, 8 if self.enable_bounds else 4)
                 target["labels"] = torch.as_tensor(cropped_labels, dtype=torch.int64)
@@ -217,7 +225,7 @@ class RandomResize(object):
                 if bbox[0] < bbox[2] - 1 and bbox[1] < bbox[3] - 1:
                     resized_bboxes.append(bbox)
                     resized_labels.append(label)
-                         
+
             if len(resized_bboxes) > 0:
                 target["boxes"] = torch.as_tensor(resized_bboxes, dtype=torch.float32).reshape(-1, 8 if self.enable_bounds else 4)
                 target["labels"] = torch.as_tensor(resized_labels, dtype=torch.int64)
@@ -316,7 +324,7 @@ class RandomCrop(object):
                 if bbox[0] < bbox[2] and bbox[1] < bbox[3]:
                     cropped_bboxes.append(bbox)
                     cropped_labels.append(label)
-                         
+
             if len(cropped_bboxes) > 0:
                 target["boxes"] = torch.as_tensor(cropped_bboxes, dtype=torch.float32).reshape(-1, 8 if self.enable_bounds else 4)
                 target["labels"] = torch.as_tensor(cropped_labels, dtype=torch.int64)
@@ -398,7 +406,7 @@ class RandomErasingWithTarget(object):
         img = self.transform(img)
 
         return img, target
-    
+
     def __repr__(self):
         return f"{self.__class__.__name__}({', '.join([f'{k}={v!r}' for k, v in self.__dict__.items() if not k.startswith('_')])})"
 
@@ -410,7 +418,7 @@ class ToPILImageWithTarget(object):
         img = self.transform(img)
 
         return img, target
-    
+
     def __repr__(self):
         return f"{self.__class__.__name__}({', '.join([f'{k}={v!r}' for k, v in self.__dict__.items() if not k.startswith('_')])})"
 
@@ -421,10 +429,10 @@ class RandomDilation(object):
 
     def __call__(self, img: PIL.Image.Image, target: dict):
         r = torch.rand(()).item()
-        
+
         if r <= self.probability:
             img = img.filter(self.filter)
-        
+
         return img, target
 
 class RandomErosion(object):
@@ -434,10 +442,10 @@ class RandomErosion(object):
 
     def __call__(self, img: PIL.Image.Image, target: dict):
         r = torch.rand(()).item()
-        
+
         if r <= self.probability:
             img = img.filter(self.filter)
-        
+
         return img, target
 
 class RandomResize(object):
@@ -464,7 +472,7 @@ class RandomResize(object):
             resized_bboxes.append(bbox)
 
         target["boxes"] = torch.as_tensor(resized_bboxes, dtype=torch.float32).reshape(-1, 8 if self.enable_bounds else 4)
-        
+
         return resized_image, target
 
 class RandomMaxResize(object):
@@ -487,7 +495,7 @@ class RandomMaxResize(object):
             resized_bboxes.append(bbox)
 
         target["boxes"] = torch.as_tensor(resized_bboxes, dtype=torch.float32).reshape(-1, 8 if self.enable_bounds else 4)
-        
+
         return resized_image, target
 
     def __repr__(self):

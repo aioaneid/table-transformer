@@ -139,3 +139,30 @@ def plot_precision_recall(files, naming_scheme='iter'):
     axs[1].set_title('Scores / Recall')
     axs[1].legend(names)
     return fig, axs
+
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--coco_eval_path', type=argparse.FileType('rb'), nargs='+')
+    parser.add_argument(
+        "--plot_path",
+        required=True,
+        type=PurePath
+    )
+    return parser.parse_args()
+
+
+def make_image(coco_eval_files, plot_path):
+    try:
+        os.makedirs(os.path.dirname(plot_path))
+    except OSError as exc: # Guard against race condition
+        if exc.errno != errno.EEXIST:
+            raise
+    fig, axs = plot_precision_recall(coco_eval_files)
+    fig.savefig(plot_path)
+
+def main():
+    args = get_args()
+    make_image(args.coco_eval_path, args.plot_path)
+
+if __name__ == '__main__':
+    main()

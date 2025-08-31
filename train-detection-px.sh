@@ -4,7 +4,7 @@ device=cuda &&
 train_instant=202403080000000000 &&
 code=$(basename $(pwd)) &&
 val_max_size=0 &&
-d=/.cache/huggingface/hub/datasets--bsmock--pubtables-1m/snapshots/35b1c097807e0b07ec5313879b85956b7b3890db/PubTables-1M-Detection &&
+d=~/.cache/huggingface/hub/datasets--bsmock--pubtables-1m/snapshots/35b1c097807e0b07ec5313879b85956b7b3890db/PubTables-1M-Detection &&
 mkdir -p ~/work/tmp/detection/train &&
 for epochs in 1 2 4 8 16 20; do
     for px in 4 8 16; do

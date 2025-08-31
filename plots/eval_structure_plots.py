@@ -10,6 +10,7 @@ import grits_metrics
 
 import matplotlib.pyplot as plt
 from matplotlib.ticker import AutoMinorLocator
+from mpl_toolkits.axes_grid1.inset_locator import mark_inset, zoomed_inset_axes
 
 
 def get_args_parser():
@@ -17,6 +18,14 @@ def get_args_parser():
     parser.add_argument("--msft_logs", type=pathlib.Path, nargs="*", default=[])
     parser.add_argument(
         "--msft_log_pattern",
+        type=re.compile,
+        default=r".*_test_split_name_(?P<test_split_name>.*)_test_max_size_(?P<test_max_size>\d+)_epoch_(?P<epoch>\d+)[.]log",
+    )
+    parser.add_argument(
+        "--tatrv1_1_msft_logs", type=pathlib.Path, nargs="*", default=[]
+    )
+    parser.add_argument(
+        "--tatrv1_1_msft_log_pattern",
         type=re.compile,
         default=r".*_test_split_name_(?P<test_split_name>.*)_test_max_size_(?P<test_max_size>\d+)_epoch_(?P<epoch>\d+)[.]log",
     )
@@ -104,6 +113,12 @@ def get_args_parser():
         default=["solid", "dashed", "dashed", "dashed", "dashed", "dashed"],
     )
     parser.add_argument(
+        "--colors",
+        type=str,
+        nargs="*",
+        default=[],
+    )
+    parser.add_argument(
         "--vertical_axis_labels",
         action=argparse.BooleanOptionalAction,
         help="Show labels on vertical axis.",
@@ -114,6 +129,12 @@ def get_args_parser():
         action=argparse.BooleanOptionalAction,
         help="Show text annotations.",
         default=True,
+    )
+    parser.add_argument(
+        "--magnify",
+        action=argparse.BooleanOptionalAction,
+        help="Magnify.",
+        default=False,
     )
     parser.add_argument(
         "--min_epochs",
@@ -250,16 +271,23 @@ def grits_name(key, *, text_usetex):
             return "GriTS Content"
         case "grits_loc":
             return "GriTS Location"
-    
 
 
-def draw_line(table_type, label, v, c, epochs, index, key, args, ax):
-    x = [i + 1 for i in range(args.min_epochs - 1, epochs) if i < len(v) and v[i]]
-    y = [
-        getattr(getattr(value[1], table_type).grits, key)
-        for i, value in enumerate(v)
-        if i >= args.min_epochs - 1 and i < epochs and value is not None
-    ]
+def draw_line_of_data(
+    x,
+    y,
+    table_type,
+    label,
+    v,
+    c,
+    epochs,
+    index,
+    args,
+    ax,
+    lw,
+    markersize,
+    markeredgewidth,
+):
     test_max_size_table_count_list = [
         (value[0], getattr(value[1], table_type).table_count)
         for i, value in enumerate(v)
@@ -272,12 +300,13 @@ def draw_line(table_type, label, v, c, epochs, index, key, args, ax):
         label=label,
         # linestyle=(0, (1 + index // s, 1 + index % s)),
         linestyle=args.default_linestyles[index % len(args.default_linestyles)],
-        markersize=4,
+        markersize=markersize,
         marker=marker,
+        markeredgewidth=markeredgewidth,
         color=c,
         fillstyle="none",
         alpha=0.85,
-        linewidth=0.875,
+        linewidth=lw,
     )
     if args.annotate:
         (ks,) = np.nonzero(y == np.max(y)) if y else (np.empty((0,), dtype=np.int64),)
@@ -302,11 +331,53 @@ def draw_line(table_type, label, v, c, epochs, index, key, args, ax):
             )
 
 
-def create_figure(epochs, args):
+def draw_line(
+    table_type,
+    label,
+    v,
+    c,
+    epochs,
+    index,
+    key,
+    args,
+    ax,
+    epoch_offset,
+    lw,
+    markersize,
+    markeredgewidth,
+):
+    x = [
+        i + 1 + epoch_offset
+        for i in range(args.min_epochs - 1, epochs)
+        if i < len(v) and v[i]
+    ]
+    y = [
+        getattr(getattr(value[1], table_type).grits, key)
+        for i, value in enumerate(v)
+        if i >= args.min_epochs - 1 and i < epochs and value is not None
+    ]
+    draw_line_of_data(
+        x,
+        y,
+        table_type,
+        label,
+        v,
+        c,
+        epochs,
+        index,
+        args,
+        ax,
+        lw,
+        markersize,
+        markeredgewidth,
+    )
+
+
+def create_figure(epochs, args, epoch_offset):
     fig = plt.figure(figsize=(8, 8 / args.aspect) if args.aspect else None)
     ax = fig.subplots()  # add_subplot(111, aspect="equal")
     space_for_legend = 0
-    ax.set_xlim(args.min_epochs - 0.25, epochs + 0.25 + space_for_legend)
+    ax.set_xlim(args.min_epochs - 0.25, epochs + 0.25 + space_for_legend + epoch_offset)
     ax.set_xticks(np.arange(epochs, args.min_epochs, -1), minor=True)
     # ax.set_xticks(np.arange((epochs + 4) // 5 * 5, args.min_epochs - 1, -5))
     ax.set_xticks(np.arange((args.min_epochs + 4) // 5 * 5, epochs + 1, 5))
@@ -321,15 +392,27 @@ def create_figure(epochs, args):
     return fig, ax
 
 
+def y_bounds(xs, ys, x1, x2):
+    relevant_y = [
+        yy
+        for xs, ys in zip(xs.values(), ys.values(), strict=True)
+        for xx, yy in zip(xs, ys, strict=True)
+        if x1 <= xx and xx <= x2
+    ]
+    diff = max(relevant_y) - min(relevant_y)
+    y_factor = 0.5
+    return min(relevant_y) - diff * y_factor, max(relevant_y) + diff * y_factor
+
+
 def draw_plots(args):
     d = collections.defaultdict(list)
     for px_type, (log_pattern, logs) in {
         "msft": (args.msft_log_pattern, args.msft_logs),
+        "tatrv1_1": (args.msft_log_pattern, args.tatrv1_1_msft_logs),
         "std": (args.standard_log_pattern, args.standard_logs),
         "stdr": (args.standard_random_log_pattern, args.standard_random_logs),
         "fix_all": (args.fix_all_log_pattern, args.fix_all_logs),
     }.items():
-
         for file_path in logs:
             # print(file_path)
             if not file_path.exists():
@@ -419,19 +502,39 @@ def draw_plots(args):
                     else None
                 )
                 print(image_path)
-                fig, ax = create_figure(epochs, args)
+                fig, ax = create_figure(
+                    epochs, args, epoch_offset=0.5 * ("val tatrv1_1" in d)
+                )
                 for index, ((label, v), c) in enumerate(
                     zip(
                         # sorted(d.items()),
                         d.items(),
-                        sns.color_palette(cc.glasbey, n_colors=len(d)),
+                        [eval(color_string) for color_string in args.colors]
+                        + sns.color_palette(
+                            cc.glasbey, n_colors=len(d) - len(args.colors)
+                        ),
                     )
                 ):
-                    draw_line(table_type, label, v, c, epochs, index, key, args, ax)
+                    draw_line(
+                        table_type,
+                        label,
+                        v,
+                        c,
+                        epochs,
+                        index,
+                        key,
+                        args,
+                        ax,
+                        epoch_offset=0.5 * (label == "val tatrv1_1"),
+                        lw=0.875,
+                        markersize=6,
+                        markeredgewidth=1,
+                    )
                 ax.set(
                     xlabel="Epoch", ylabel=grits_name(key, text_usetex=args.text_usetex)
                 )
-                ax.legend(loc="lower right", fontsize="small", ncol=1)
+                # ax.legend(loc="lower right", fontsize="small", ncol=1)
+                ax.legend(loc="lower right", ncol=1)
                 if args.output_dir:
                     fig.savefig(
                         image_path,
@@ -446,37 +549,100 @@ def draw_plots(args):
                 else None
             )
             print(image_path)
-            fig, ax = create_figure(epochs, args)
-            # "TATR v1.1 with bug fixes" if label == "val std" else "Constrained box relaxation" if label == "val pxct-inf" else label,
+            fig, ax = create_figure(
+                epochs, args, epoch_offset=0.5 * ("val tatrv1_1" in d)
+            )
+
+            if args.magnify:
+                axins_simple = zoomed_inset_axes(ax, zoom=3, loc="center left")
+                axins_complex = zoomed_inset_axes(ax, zoom=3, loc="upper center")
+
+            # "TATR v1.1 with bug fixes" if label == "val std" else "Constrained box relaxation." if label == "val pxct-inf" else label,
             table_types = ("simple", "complex")
+            x, y = collections.defaultdict(dict), collections.defaultdict(dict)
             for index, ((table_type, (label, v)), c) in enumerate(
                 zip(
                     itertools.product(table_types, sorted(d.items())),
-                    sns.color_palette(cc.glasbey, n_colors=len(d) * 3),
+                    [eval(color_string) for color_string in args.colors]
+                    + sns.color_palette(
+                        cc.glasbey, n_colors=len(d) * 2 - len(args.colors)
+                    ),
+                    strict=False,
                 )
             ):
-                draw_line(
-                    table_type,
-                    "{}: {}".format(
-                        table_type.title(),
-                        (
-                            "TATR v1.1 with bug fixes"
-                            if label == "val std"
-                            else (
-                                "Constrained box relaxation"
-                                if label == "val pxct-inf"
-                                else label
-                            )
+                epoch_offset = 0.5 * (label == "val tatrv1_1")
+                x[table_type][label] = [
+                    i + 1 + epoch_offset
+                    for i in range(args.min_epochs - 1, epochs)
+                    if i < len(v) and v[i]
+                ]
+                y[table_type][label] = [
+                    getattr(getattr(value[1], table_type).grits, key)
+                    for i, value in enumerate(v)
+                    if i >= args.min_epochs - 1 and i < epochs and value is not None
+                ]
+
+                # print(table_type, key, index, label, c)
+                for i, axis in enumerate(
+                    [ax] + ([axins_simple, axins_complex] if args.magnify else [])
+                ):
+                    draw_line_of_data(
+                        x[table_type][label],
+                        y[table_type][label],
+                        table_type,
+                        "{}: {}".format(
+                            table_type.title(),
+                            (
+                                "TATR v1.1 with bug fixes"
+                                if label == "val std"
+                                else (
+                                    "Constrained box relaxation"
+                                    if label == "val pxct-inf"
+                                    else (
+                                        "TATR v1.1"
+                                        if label == "val tatrv1_1"
+                                        else label
+                                    )
+                                )
+                            ),
                         ),
-                    ),
-                    v,
-                    c,
-                    epochs,
-                    index,
-                    key,
-                    args,
-                    ax,
+                        v,
+                        c,
+                        epochs,
+                        index,
+                        args,
+                        axis,
+                        lw=0.875 * 2 if i else 0.875,
+                        markersize=6 * 2 if i else 6,
+                        markeredgewidth=1 * 2 if i else 1,
+                    )
+
+            simple_color, complex_color = "maroon", "blue"
+
+            if args.magnify:
+                for axis in ["top", "bottom", "left", "right"]:
+                    axins_simple.spines[axis].set_linewidth(0.5)
+                    axins_simple.spines[axis].set_color(simple_color)
+
+                for axis in ["top", "bottom", "left", "right"]:
+                    axins_complex.spines[axis].set_linewidth(0.5)
+                    axins_complex.spines[axis].set_color(complex_color)
+
+                for axi in [axins_simple, axins_complex]:
+                    axi.tick_params(labelleft=False, labelbottom=False)
+                    axi.patch.set_alpha(0.9370)
+
+                x1, x2 = 24.85, 28.65
+                axins_simple.set_xlim(x1, x2)
+                axins_simple.set_ylim(*y_bounds(x["simple"], y["simple"], x1, x2))
+                mark_inset(ax, axins_simple, loc1=2, loc2=4, fc="none", ec=simple_color)
+
+                axins_complex.set_xlim(x1, x2)
+                axins_complex.set_ylim(*y_bounds(x["complex"], y["complex"], x1, x2))
+                mark_inset(
+                    ax, axins_complex, loc1=1, loc2=3, fc="none", ec=complex_color
                 )
+
             ax.set(xlabel="Epoch", ylabel=grits_name(key, text_usetex=args.text_usetex))
             ax.legend(loc="lower right", fontsize="small", ncol=1)
             if args.output_dir:
