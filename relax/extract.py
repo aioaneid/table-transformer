@@ -780,10 +780,6 @@ def main(
                 WholeImageStructureLabel(label).external(), box.numpy()
             )
             annotation.append(element)
-        # find structure/data/semimanual_whole_image_pascal_voc_xml -type f |
-while read f; do
-mv $f ${f%%_whole_structure.xml}.xml;
-done
         dest_annot_path = os.path.join(
             output_whole_image_structure_pascal_voc_xml_dir,
             f"{pure_posix_path.stem}.xml",
@@ -882,10 +878,6 @@ done
                 WholeImageStructureLabel(label.item()).external(), box.numpy()
             )
             annotation.append(element)
-        # find structure/data/semimanual_whole_image_pascal_voc_xml -type f |
-while read f; do
-mv $f ${f%%_whole_structure.xml}.xml;
-done
         dest_annot_path = os.path.join(
             output_whole_image_sanitized_structure_pascal_voc_xml_dir,
             f"{pure_posix_path.stem}.xml",

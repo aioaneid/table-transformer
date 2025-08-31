@@ -12,9 +12,6 @@ import annotations
 logger = logging.getLogger(__name__)
 
 
-# /home/dai~/.cache/huggingface/hub/datasets--bsmock--pubtables-1m/snapshots/6a764b276769537108c1f6250f7eaafc65f79078/PubTables-1M-Detection/images/PMC1064074_7.jpg: JPEG image data, JFIF standard 1.01, aspect ratio, density 1x1, segment length 16, baseline, precision 8, 771x1000, frames 3
-
-
 class ImageArgs(object):
     def __init__(
         self,

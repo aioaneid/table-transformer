@@ -11,6 +11,7 @@ from matplotlib import patches
 sys.path.append("detr")
 from util import box_ops
 
+
 def generate(a, upsample, n):
     # 16: 233323
     # 12: 0, 8(!)
@@ -31,32 +32,46 @@ def compute_border_boxes(outer_border, hole_border, xlim, ylim):
     return [
         hole_border if box_ops.is_present(hole_border) else None,
         outer_border if box_ops.is_present(outer_border) else None,
-        torch.tensor([xlim[0], ylim[0], outer_border[0], ylim[1]])
-        if box_ops.is_present(outer_border)
-        else None,
-        torch.tensor([xlim[0], ylim[0], xlim[1], outer_border[1]])
-        if box_ops.is_present(outer_border)
-        else None,
-        torch.tensor([xlim[0], outer_border[3], xlim[1], ylim[1]])
-        if box_ops.is_present(outer_border)
-        else None,
-        torch.tensor([outer_border[2], ylim[0], xlim[1], ylim[1]])
-        if box_ops.is_present(outer_border)
-        else None,
+        (
+            torch.tensor([xlim[0], ylim[0], outer_border[0], ylim[1]])
+            if box_ops.is_present(outer_border)
+            else None
+        ),
+        (
+            torch.tensor([xlim[0], ylim[0], xlim[1], outer_border[1]])
+            if box_ops.is_present(outer_border)
+            else None
+        ),
+        (
+            torch.tensor([xlim[0], outer_border[3], xlim[1], ylim[1]])
+            if box_ops.is_present(outer_border)
+            else None
+        ),
+        (
+            torch.tensor([outer_border[2], ylim[0], xlim[1], ylim[1]])
+            if box_ops.is_present(outer_border)
+            else None
+        ),
     ]
 
-def border_box_rectangles(border_boxes, fill):
-    return [patches.Rectangle(
-                    box[:2].cpu(),
-                    (box[2] - box[0]).item(),
-                    (box[3] - box[1]).item(),
-                    edgecolor="dimgray",
-                    facecolor="white",
-                    fill=fill,  # remove background
-                    zorder=-2 - min(i, 2),
-                    linewidth=i < 2,
-                    hatch="/" if not i else None if i == 1 else "\\",
-                ) for i, box in enumerate(border_boxes) if box is not None]
+
+def border_box_rectangles(border_boxes, fill, edge_colors):
+    return [
+        patches.Rectangle(
+            box[:2].cpu(),
+            (box[2] - box[0]).item(),
+            (box[3] - box[1]).item(),
+            edgecolor=edge_color,
+            facecolor="white",
+            fill=fill,  # remove background
+            zorder=-2 - min(i, 2),
+            linewidth=i < 2,
+            hatch="/" if not i else None if i == 1 else "\\",
+        )
+        for i, (box, edge_color) in enumerate(zip(border_boxes, edge_colors, strict=False))
+        if box is not None
+    ]
+
 
 def plot_rectangles(boxes, values, a, b, frame, filename):
     fig = plt.figure(figsize=(13, 10))
@@ -70,7 +85,7 @@ def plot_rectangles(boxes, values, a, b, frame, filename):
     ax.set_ylim(ylim)
 
     border_boxes = compute_border_boxes(a, b, xlim, ylim)
-    rectangles = border_box_rectangles(border_boxes, True)
+    rectangles = border_box_rectangles(border_boxes, True, ["dimgray"] * len(border_boxes))
     for rectangle in rectangles:
         ax.add_patch(rectangle)
 
@@ -88,7 +103,7 @@ def plot_rectangles(boxes, values, a, b, frame, filename):
                 linewidth=(lw_offset + value.item()) * lw_factor,
                 linestyle=(0, [i + 1, 1]),
                 zorder=value.item(),
-                label="{:.2f}".format(value.item()),
+                label="{:5.2f}".format(value.item()),
             )
         else:
             ax.add_patch(
@@ -102,7 +117,7 @@ def plot_rectangles(boxes, values, a, b, frame, filename):
                     linewidth=(lw_offset + value.item()) * lw_factor,
                     linestyle=(0, [i + 1, 1]),
                     zorder=value.item(),
-                    label="{:.2f}".format(value.item()),
+                    label="{:5.2f}".format(value.item()),
                 )
             )
             ax.add_patch(
@@ -121,7 +136,14 @@ def plot_rectangles(boxes, values, a, b, frame, filename):
     handles, labels = ax.get_legend_handles_labels()
     # by_label = dict(zip(labels, handles))
     # lgd = ax.legend(by_label.values(), by_label.keys(), loc="upper center", bbox_to_anchor=(1.05, +1.05))
-    lgd = ax.legend(handles, labels, loc="upper center", bbox_to_anchor=(1.05, +1.05))
+    lgd = ax.legend(
+        handles,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(1.155, 1.038),
+        fontsize="35",
+    )
+
     ax.set_xlabel(None)
     ax.set_ylabel(None)
     ax.set_xticks([])
@@ -161,7 +183,9 @@ def plot_boxes(
     frame,
     label,
 ):
-    selected_boxes, (random_box_values, random_box_neighbours) = selected_boxes_and_random_box_values
+    selected_boxes, (random_box_values, random_box_neighbours) = (
+        selected_boxes_and_random_box_values
+    )
     plot_rectangles(
         selected_boxes,
         random_box_values,
@@ -177,9 +201,13 @@ def plot_boxes(
             a,
             b,
             frame,
-            "../../work/saved/plots/random_{}_{}_neighbour.svg".format(label, function_name)
+            "/tmp/plots/random_{}_{}_neighbour.svg".format(
+                label, function_name
+            ),
         )
-    cb, (concentric_box_values, concentric_box_neighbours) = cb_and_concentric_box_values
+    cb, (concentric_box_values, concentric_box_neighbours) = (
+        cb_and_concentric_box_values
+    )
     plot_rectangles(
         cb,
         concentric_box_values,
@@ -195,7 +223,9 @@ def plot_boxes(
             a,
             b,
             frame,
-            "../../work/saved/plots/concentric_{}_{}_neighbour.svg".format(label, function_name)
+            "/tmp/plots/concentric_{}_{}_neighbour.svg".format(
+                label, function_name
+            ),
         )
 
 
@@ -334,17 +364,16 @@ def draw_plots_for_function(f, function_name, selected_boxes, cb, a, b, frame):
 def normalize_nonnegative_to_minus_one_to_one(a):
     return torch.nan_to_num(1 - 2 * a / a.max())
 
+
 def _cross_bounded_box_iou_with_bounds_distance_neighbour(pred, target):
-    distances = box_ops.cross_bounded_box_iou_with_bounds(
-        pred, target)
+    distances = box_ops.cross_bounded_box_iou_with_bounds(pred, target)
     return distances, None
 
 
 def _cross_dist_with_bounds_distance_neighbour(pred, target):
     b = pred.to(torch.float32)
     p = 1
-    x = box_ops.cross_dist_with_bounds_neighbour(
-        pred, target)
+    x = box_ops.cross_dist_with_bounds_neighbour(pred, target)
     distances = LA.vector_norm(x - b[..., None, :], ord=p, dim=-1)
     return normalize_nonnegative_to_minus_one_to_one(distances), x
 
@@ -359,8 +388,8 @@ def _cross_lp_loss_with_bounds_cxcywh_distance_neighbour(pred, target):
     distances = LA.vector_norm(x - b[..., None, :], ord=p, dim=-1)
     return (
         normalize_nonnegative_to_minus_one_to_one(distances),
-        box_ops.box_cxcywh_to_xyxy(x)
-        )
+        box_ops.box_cxcywh_to_xyxy(x),
+    )
 
 
 def draw_plots():

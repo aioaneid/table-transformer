@@ -30,6 +30,8 @@ import postprocess
 import grits
 from grits import grits_con, grits_top, grits_loc
 
+sys.path.append("plots")
+import table_plots
 
 structure_class_names = [
     'table', 'table column', 'table row', 'table column header',
@@ -52,6 +54,10 @@ normalize = transforms.Compose([
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 
+_DPI = 300
+_DEBUG_IMAGE_FILE_EXTENSION = ".jpg"  # Change to .png for better quality.
+_REPLACE_WITH_PNG = False  # Put a .png file next to the .jpg file for better quality.
+_PADDING = 0  # Change to 1 for better visual separation
 
 def objects_to_cells(bboxes, labels, scores, page_tokens, structure_class_names, structure_class_thresholds, structure_class_map):
     bboxes, scores, labels = postprocess.apply_class_thresholds(bboxes, labels, scores,
@@ -61,9 +67,9 @@ def objects_to_cells(bboxes, labels, scores, page_tokens, structure_class_names,
     table_objects = []
     for bbox, score, label in zip(bboxes, scores, labels):
         table_objects.append({'bbox': bbox, 'score': score, 'label': label})
-        
+
     table = {'objects': table_objects, 'page_num': 0}
-    
+
     table_class_objects = [obj for obj in table_objects if obj['label'] == structure_class_map['table']]
     if len(table_class_objects) > 1:
         table_class_objects = sorted(table_class_objects, key=lambda x: x['score'], reverse=True)
@@ -71,14 +77,14 @@ def objects_to_cells(bboxes, labels, scores, page_tokens, structure_class_names,
         table_bbox = list(table_class_objects[0]['bbox'])
     except:
         table_bbox = (0,0,1000,1000)
-    
+
     tokens_in_table = [token for token in page_tokens if grits.iob(token['bbox'], table_bbox) >= 0.5]
-    
+
     # Determine the table cell structure from the objects
     table_structures, cells, confidence_score = postprocess.objects_to_cells(table, table_objects, tokens_in_table,
                                                                     structure_class_names,
                                                                     structure_class_thresholds)
-    
+
     return table_structures, cells, confidence_score
 
 
@@ -382,26 +388,6 @@ def rescale_bboxes(out_bbox, size):
     return b
 
 
-def get_bbox_decorations(data_type, label):
-    if label == 0:
-        if data_type == 'detection':
-            return 'brown', 0.05, 3, '//'
-        else:
-            return 'brown', 0, 3, None 
-    elif label == 1:
-        return 'red', 0.15, 2, None
-    elif label == 2:
-        return 'blue', 0.15, 2, None
-    elif label == 3:
-        return 'magenta', 0.2, 3, '//'
-    elif label == 4:
-        return 'cyan', 0.2, 4, '//'
-    elif label == 5:
-        return 'green', 0.2, 4, '\\\\'
-    
-    return 'gray', 0, 0, None
-
-
 def compute_metrics_summary(sample_metrics, mode):
     """
     Print a formatted summary of the table structure recognition metrics
@@ -514,18 +500,22 @@ def eval_tsr_sample(target, pred_logits, pred_bboxes, mode, fast_grits, debug_gr
     return metrics
 
 
-def visualize(args, target, pred_logits, pred_bboxes):
+def visualize(args, target, pred_logits, pred_bboxes, data_set_image_extension):
     img_filepath = target["img_path"]
     if not re.compile(args.debug_img_path_re_filter).fullmatch(img_filepath):
         return
+    saved_img_filepath = img_filepath
     img_filename = img_filepath.split("/")[-1]
 
-    # bboxes_out_filename = img_filename.replace(".jpg", "_bboxes.jpg")
-    bboxes_out_filename = re.sub(r"\.[^.]*$", ".jpg", img_filename)
+    bboxes_out_filename = re.sub(r"\.[^.]*$", _DEBUG_IMAGE_FILE_EXTENSION, img_filename)
     bboxes_out_filepath = os.path.join(args.debug_save_dir, bboxes_out_filename)
 
     img = Image.open(img_filepath)
     img_size = img.size
+
+    if _REPLACE_WITH_PNG:
+        png_img_filename = saved_img_filepath.replace(data_set_image_extension, ".png")
+        png_img = Image.open(png_img_filename)
 
     m = pred_logits.softmax(-1).max(-1)
     pred_labels = list(m.indices.detach().cpu().numpy())
@@ -533,41 +523,29 @@ def visualize(args, target, pred_logits, pred_bboxes):
     pred_bboxes = pred_bboxes.detach().cpu()
     pred_bboxes = [elem.tolist() for elem in rescale_bboxes(pred_bboxes, img_size)]
 
-    fig,ax = plt.subplots(1)
-    ax.imshow(img, interpolation='lanczos')
+    fig, ax = plt.subplots(1)
+    ax.imshow(png_img if _REPLACE_WITH_PNG else img, interpolation='none')
 
-    for bbox, label, score in zip(pred_bboxes, pred_labels, pred_scores):
-        if ((args.data_type == 'structure' and not label > 5)
-            or (args.data_type == 'detection' and not label > 1)
-            and score > 0.5):
-            color, alpha, linewidth, hatch = get_bbox_decorations(args.data_type,
-                                                                  label)
-            # Fill
-            rect = patches.Rectangle(bbox[:2], bbox[2]-bbox[0], bbox[3]-bbox[1],
-                                     linewidth=linewidth, alpha=alpha,
-                                     edgecolor='none',facecolor=color,
-                                     linestyle=None)
-            ax.add_patch(rect)
-            # Hatch
-            rect = patches.Rectangle(bbox[:2], bbox[2]-bbox[0], bbox[3]-bbox[1],
-                                     linewidth=1, alpha=0.4,
-                                     edgecolor=color,facecolor='none',
-                                     linestyle='--',hatch=hatch)
-            ax.add_patch(rect)
-            # Edge
-            rect = patches.Rectangle(bbox[:2], bbox[2]-bbox[0], bbox[3]-bbox[1],
-                                     linewidth=linewidth,
-                                     edgecolor=color,facecolor='none',
-                                     linestyle="--")
-            ax.add_patch(rect) 
+    for rect in table_plots.get_rectangles(
+        table_plots.scale_bbox(
+            pred_bboxes,
+            png_img.size[0] / img_size[0] if _REPLACE_WITH_PNG else 1,
+            png_img.size[1] / img_size[1] if _REPLACE_WITH_PNG else 1,
+        ),
+        pred_labels,
+        pred_scores,
+        args.data_type,
+        _PADDING
+    ):
+        ax.add_patch(rect)
 
     fig.set_size_inches((15, 15))
     plt.axis('off')
-    plt.savefig(bboxes_out_filepath, bbox_inches='tight', dpi=100)
+    plt.savefig(bboxes_out_filepath, bbox_inches='tight', dpi=_DPI)
 
     if args.data_type == 'structure':
-        img_words_filepath = os.path.join(args.table_words_dir, img_filename.replace(".jpg", "_words.json"))
-        cells_out_filename = img_filename.replace(".jpg", "_cells.jpg")
+        img_words_filepath = os.path.join(args.table_words_dir, img_filename.replace(data_set_image_extension, "_words.json"))
+        cells_out_filename = img_filename.replace(data_set_image_extension, "_cells{}".format(_DEBUG_IMAGE_FILE_EXTENSION))
         cells_out_filepath = os.path.join(args.debug_save_dir, cells_out_filename)
 
         with open(img_words_filepath, 'r') as f:
@@ -577,29 +555,21 @@ def visualize(args, target, pred_logits, pred_bboxes):
                                             tokens, structure_class_names,
                                             structure_class_thresholds, structure_class_map)
 
-        fig,ax = plt.subplots(1)
-        ax.imshow(img, interpolation='lanczos')
+        fig, ax = plt.subplots(1)
+        ax.imshow(png_img if _REPLACE_WITH_PNG else img, interpolation='none')
 
         for cell in pred_cells:
-            bbox = cell['bbox']
-            if cell['header']:
-                alpha = 0.3
-            else:
-                alpha = 0.125
-            rect = patches.Rectangle(bbox[:2], bbox[2]-bbox[0], bbox[3]-bbox[1], linewidth=1, 
-                                    edgecolor='none',facecolor="magenta", alpha=alpha)
-            ax.add_patch(rect)
-            rect = patches.Rectangle(bbox[:2], bbox[2]-bbox[0], bbox[3]-bbox[1], linewidth=1, 
-                                    edgecolor="magenta",facecolor='none',linestyle="--",
-                                    alpha=0.08, hatch='///')
-            ax.add_patch(rect)
-            rect = patches.Rectangle(bbox[:2], bbox[2]-bbox[0], bbox[3]-bbox[1], linewidth=1, 
-                                    edgecolor="magenta",facecolor='none',linestyle="--")
-            ax.add_patch(rect)
+            for rect in table_plots.get_cell_rectangles(
+                cell,
+                png_img.size[0] / img_size[0] if _REPLACE_WITH_PNG else 1,
+                png_img.size[1] / img_size[1] if _REPLACE_WITH_PNG else 1,
+                _PADDING
+            ):
+                ax.add_patch(rect)
 
         fig.set_size_inches((15, 15))
         plt.axis('off')
-        plt.savefig(cells_out_filepath, bbox_inches='tight', dpi=100)
+        plt.savefig(cells_out_filepath, bbox_inches='tight', dpi=_DPI)
 
     plt.close('all')
 
@@ -633,7 +603,7 @@ def evaluate(args, model, criterion, postprocessors, data_loader, base_ds, devic
         pred_logits_collection = []
         pred_bboxes_collection = []
         targets_collection = []
-    
+
     num_batches = len(data_loader)
     print_every = max(args.eval_step, int(math.ceil(num_batches / 100)))
     batch_num = 0
@@ -655,7 +625,7 @@ def evaluate(args, model, criterion, postprocessors, data_loader, base_ds, devic
 
         if args.debug:
             for target, pred_logits, pred_boxes in zip(targets, outputs['pred_logits'], outputs['pred_boxes']):
-                visualize(args, target, pred_logits, pred_boxes)
+                visualize(args, target, pred_logits, pred_boxes, base_ds.image_extension)
 
         loss_dict = criterion(outputs, targets)
         weight_dict = criterion.weight_dict
@@ -693,14 +663,14 @@ def evaluate(args, model, criterion, postprocessors, data_loader, base_ds, devic
                         target[k] = v.cpu()
                 img_filepath = target["img_path"]
                 img_filename = img_filepath.split("/")[-1]
-                img_words_filepath = os.path.join(args.table_words_dir, img_filename.replace(".jpg", "_words.json"))
+                img_words_filepath = os.path.join(args.table_words_dir, img_filename.replace(base_ds.image_extension, "_words.json"))
                 target["img_words_path"] = img_words_filepath
             targets_collection += targets
 
             if batch_num % args.eval_step == 0 or batch_num == num_batches:
                 arguments = zip(targets_collection, pred_logits_collection, pred_bboxes_collection,
                                 repeat(args.mode), repeat(args.fast_grits), repeat(args.debug_grits))
-                if args.eval_pool_size:
+                if args.eval_pool_size == 1:
                     metrics = [eval_tsr_sample(*argument_tuple) for argument_tuple in arguments]
                 else:
                     with multiprocessing.get_context('spawn').Pool(args.eval_pool_size) as pool:
@@ -714,7 +684,7 @@ def evaluate(args, model, criterion, postprocessors, data_loader, base_ds, devic
     metric_logger.synchronize_between_processes()
     # Prints median (global_avg), see detr/util/misc.py.
     # class_error_unscaled is (1 - precision@1) * 100.
-    
+
     print("Averaged stats:", metric_logger)
 
     if num_batches:

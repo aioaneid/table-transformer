@@ -25,7 +25,7 @@ The available list of scripts is described below. Note that only those using pyt
   - [train-detection-midline.sh](./train-detection-midline.sh): Trains the model with the dataset created by [relax-dataset-detection-pxs.sh](./relax-dataset-detection-pxs.sh);
 - Table Structure Recognition (TSR)
   - [relax-constraints-inf.sh](./relax-constraints-inf.sh): Relax the TSR objects in the training dataset while making sure that the same table cell matrix ensues. Can be run in parallel, e.g. one process pe CPU core. Upon restart continues where it left over, with the exception that the tables with at least a spanning cell which is dropped during matrix cell extraction are reprocesses after each restart.
-  - [make-structure-pxct-dataset.sh](./make-structure-pxct-dataset): Makes the table outer border identical to the original table bounding box. Makes a complete training dataset, including without relaxation those tables with spanning cells which get dropped in the cell matrix extraction step.
+  - [make-structure-pxct-dataset.sh](./make-structure-pxct-dataset.sh): Makes the table outer border identical to the original table bounding box. Makes a complete training dataset, including without relaxation those tables with spanning cells which get dropped in the cell matrix extraction step.
   - [train-structure-pxct.sh](./train-structure-pxct.sh): Trains a TSR model on the constrained box relaxation dataset.
 
 Note that just like with TATR v1.1, the TSR eval should be performed on table images with very little padding as created by [create_padded_dataset.py](./scripts/create_padded_dataset.py).
@@ -39,7 +39,7 @@ conda run --no-capture-output --live-stream -n tatr python src/main.py --data_ty
 
 The metrics batches for an arbitrary epoch can then be merged together using [plots/aggregate_json_grits.py](./plots/aggregate_json_grits.py).
 
-Note that the training scripts allow a new `--mode` option `validate` which can be executed in a subsequent phase to training.
+The training scripts allow a new `--mode` option `validate` which can be executed in a subsequent phase to training.
 
 ## Performance Metrics
 
@@ -60,7 +60,7 @@ Note that the training scripts allow a new `--mode` option `validate` which can 
 | Model                          | Tables  | Acc<sub>Con</sub> | GriTS<sub>Con</sub> | GriTS<sub>Loc</sub> | GriTS<sub>Top</sub> | Epochs |
 |--------------------------------|---------|-------------|---------------|---------------|---------------|--------|
 | TATR v1.0                      | All     | 0.8243      | 0.9850        | 0.9786        | 0.9849        | 20     |
-| TATR v1.1                      | All     | 0.8326      | 0.9862        | 0.9797        | 0.9851        | 28.5   |
+| TATR v1.1                      | All     | 0.8326      | 0.9855        | 0.9797        | 0.9851        | 28.5   |
 | TATR v1.1 with bug fixes       | All     | 0.8433      | 0.9862        | 0.9806        | 0.9858        | 28     |
 | Constrained box relaxation     | All     | **0.8458**  | **0.9866**    | **0.9811**    | **0.9861**    | 28     |
 | TATR v1.1 with bug fixes       | Simple  | 0.9661      | 0.9947        | 0.9934        | 0.9953        | 28     |
