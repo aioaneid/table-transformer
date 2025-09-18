@@ -25,10 +25,11 @@ The available list of scripts is described below. Note that only those using pyt
   - [train-detection-midline.sh](./train-detection-midline.sh): Trains the model with the dataset created by [relax-dataset-detection-pxs.sh](./relax-dataset-detection-pxs.sh);
 - Table Structure Recognition (TSR)
   - [relax-constraints-inf.sh](./relax-constraints-inf.sh): Relax the TSR objects in the training dataset while making sure that the same table cell matrix ensues. Can be run in parallel, e.g. one process pe CPU core. Upon restart continues where it left over, with the exception that the tables with at least a spanning cell which is dropped during matrix cell extraction are reprocesses after each restart.
+    - For convenience, the precomputed train split with relaxed bounding boxes is available as `train_pxct_inf` at <https://huggingface.co/datasets/aioaneid/relaxed-table-structure>.
   - [make-structure-pxct-dataset.sh](./make-structure-pxct-dataset.sh): Makes the table outer border identical to the original table bounding box. Makes a complete training dataset, including without relaxation those tables with spanning cells which get dropped in the cell matrix extraction step.
   - [train-structure-pxct.sh](./train-structure-pxct.sh): Trains a TSR model on the constrained box relaxation dataset.
 
-Note that just like with TATR v1.1, the TSR eval should be performed on table images with very little padding as created by [create_padded_dataset.py](./scripts/create_padded_dataset.py).
+Note that just like with TATR v1.1, the TSR eval should be performed on table images with very little padding as created by [create_padded_dataset.py](./scripts/create_padded_dataset.py). For convenience, the `val` and `test` splits with tight padding are available at <https://huggingface.co/datasets/aioaneid/relaxed-table-structure>.
 
 The GriTS evaluation code can be executed in parallel on different batches of images, e.g.:
 
@@ -58,6 +59,8 @@ The code can also be used without box relaxation by specifying `--no-enable_boun
 | All images, all objects with hole and outer bounding boxes each relaxed symetrically by (up to) 8 pixels. TATR v1.1 cropping around original bounding box   | **0.0014**  | 0.9760   | 0.9850   |
 
 ### Training for Table Structure Recognition with Box Relaxation
+
+"Constrained box relaxation" below refers to `model_28.pth` from <https://huggingface.co/aioaneid/relaxed-table-structure>.
 
 | Model                          | Tables  | Acc<sub>Con</sub> | GriTS<sub>Con</sub> | GriTS<sub>Loc</sub> | GriTS<sub>Top</sub> | Epochs |
 |--------------------------------|---------|-------------|---------------|---------------|---------------|--------|
