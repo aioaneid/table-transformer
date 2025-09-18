@@ -1,6 +1,6 @@
 # TATR with Box Relaxation
 
-Clone of <https://github.com/microsoft/table-transformer> with changes to enable box relaxation.
+Clone of <https://github.com/microsoft/table-transformer> with several improvements and box relaxation.
 
 Usage:
 
@@ -41,6 +41,8 @@ The metrics batches for an arbitrary epoch can then be merged together using [pl
 
 Note that the training scripts allow a new `--mode` option `validate` which can be executed in a subsequent phase to training.
 
+The code can also be used without box relaxation by specifying `--no-enable_bounds` when running `main.py`.
+
 ## Performance Metrics
 
 ### Training for Table Detection with a subset of the tables
@@ -67,3 +69,21 @@ Note that the training scripts allow a new `--mode` option `validate` which can 
 | Constrained box relaxation     | Simple  | **0.9667**  | **0.9954**    | **0.9941**    | **0.9960**    | 28     |
 | TATR v1.1 with bug fixes       | Complex | 0.7324      | 0.9786        | 0.9693        | **0.9774**    | 28     |
 | Constrained box relaxation     | Complex | **0.7363**  | **0.9789**    | **0.9697**    | 0.9773        | 28     |
+
+## Citation
+If you find this work useful, please cite: Aioanei, D. (2025). *Relaxed Bounding Boxes for Object Detection*. *ICCK Journal of Image Analysis and Processing, 1*(3), 107&ndash;124. [https://doi.org/10.62762/JIAP.2025.507329](https://doi.org/10.62762/JIAP.2025.507329)
+
+In BibTeX format:
+```
+@article{aioanei2025relaxed,
+  author  = {Aioanei, Daniel},
+  title   = {Relaxed Bounding Boxes for Object Detection},
+  journal = {ICCK Journal of Image Analysis and Processing},
+  year    = {2025},
+  volume  = {1},
+  number  = {3},
+  pages   = {107--124},
+  doi     = {10.62762/JIAP.2025.507329},
+  url     = {https://doi.org/10.62762/JIAP.2025.507329}
+}
+```
