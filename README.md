@@ -25,11 +25,11 @@ The available list of scripts is described below. Note that only those using pyt
   - [train-detection-midline.sh](./train-detection-midline.sh): Trains the model with the dataset created by [relax-dataset-detection-pxs.sh](./relax-dataset-detection-pxs.sh);
 - Table Structure Recognition (TSR)
   - [relax-constraints-inf.sh](./relax-constraints-inf.sh): Relax the TSR objects in the training dataset while making sure that the same table cell matrix ensues. Can be run in parallel, e.g. one process pe CPU core. Upon restart continues where it left over, with the exception that the tables with at least a spanning cell which is dropped during matrix cell extraction are reprocesses after each restart.
-    - For convenience, the precomputed train split with relaxed bounding boxes is available as `train_pxct_inf` at <https://huggingface.co/datasets/aioaneid/relaxed-table-structure>.
+    - The precomputed train split with relaxed bounding boxes is available as `train_pxct_inf` at <https://huggingface.co/datasets/aioaneid/relaxed-table-structure>.
   - [make-structure-pxct-dataset.sh](./make-structure-pxct-dataset.sh): Makes the table outer border identical to the original table bounding box. Makes a complete training dataset, including without relaxation those tables with spanning cells which get dropped in the cell matrix extraction step.
   - [train-structure-pxct.sh](./train-structure-pxct.sh): Trains a TSR model on the constrained box relaxation dataset.
 
-Note that just like with TATR v1.1, the TSR eval should be performed on table images with very little padding as created by [create_padded_dataset.py](./scripts/create_padded_dataset.py). For convenience, the `val` and `test` splits with tight padding are available at <https://huggingface.co/datasets/aioaneid/relaxed-table-structure>.
+Just like with TATR v1.1, the TSR eval should be performed on table images with very little padding as created by [create_padded_dataset.py](./scripts/create_padded_dataset.py). The `val` and `test` splits with tight padding are available at <https://huggingface.co/datasets/aioaneid/relaxed-table-structure>.
 
 The GriTS evaluation code can be executed in parallel on different batches of images, e.g.:
 
@@ -48,30 +48,32 @@ The code can also be used without box relaxation by specifying `--no-enable_boun
 
 ### Training for Table Detection with a subset of the tables
 
-| Model                      | Cardinality Error | AP     | AR     |
-|----------------------------|-------------|--------|--------|
-| All images, all tables         | 0.0018      | **0.9800** | **0.9900** |
-| Only images with exactly one object (*table* or *table rotated*)           | *0.1050*    | *0.8700*  | *0.8870*  |
-| All images, one randomly-selected object (*table* or *table rotated*) per image             | 0.0186      | 0.9770   | 0.9880   |
-| All images, all objects counted split by category (*table* or *table rotated*), one randomly-selected object per image has a bounding box            | 0.0018      | 0.9730   | 0.9880   |
-| All images, all objects with hole and outer bounding boxes each relaxed by 2 pixels. TATR v1.1 cropping around the outer border     | 0.0018      | **0.9800** | **0.9900** |
-| All images, all objects with hole and outer bounding boxes each relaxed symetrically by (up to) 4 pixels. TATR v1.1 cropping around original bounding box   | 0.0016      | 0.9790   | **0.9900** |
-| All images, all objects with hole and outer bounding boxes each relaxed symetrically by (up to) 8 pixels. TATR v1.1 cropping around original bounding box   | **0.0014**  | 0.9760   | 0.9850   |
+| Model                                                                                                                                                     | Cardinality Error | AP         | AR         |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | ---------- | ---------- |
+| All images, all tables                                                                                                                                    | 0.0018            | **0.9800** | **0.9900** |
+| Only images with exactly one object (*table* or *table rotated*)                                                                                          | *0.1050*          | *0.8700*   | *0.8870*   |
+| All images, one randomly-selected object (*table* or *table rotated*) per image                                                                           | 0.0186            | 0.9770     | 0.9880     |
+| All images, all objects counted split by category (*table* or *table rotated*), one randomly-selected object per image has a bounding box                 | 0.0018            | 0.9730     | 0.9880     |
+| All images, all objects with hole and outer bounding boxes each relaxed by 2 pixels. TATR v1.1 cropping around the outer border                           | 0.0018            | **0.9800** | **0.9900** |
+| All images, all objects with hole and outer bounding boxes each relaxed symetrically by (up to) 4 pixels. TATR v1.1 cropping around original bounding box | 0.0016            | 0.9790     | **0.9900** |
+| All images, all objects with hole and outer bounding boxes each relaxed symetrically by (up to) 8 pixels. TATR v1.1 cropping around original bounding box | **0.0014**        | 0.9760     | 0.9850     |
 
 ### Training for Table Structure Recognition with Box Relaxation
 
-"Constrained box relaxation" below refers to `model_28.pth` from <https://huggingface.co/aioaneid/relaxed-table-structure>.
+The table below refers to the best results obtained up to and including `model_28.pth` of:
+* "TATR v1.1 with bug fixes": <https://huggingface.co/aioaneid/baseline-table-structure>;
+* "Constrained box relaxation": <https://huggingface.co/aioaneid/relaxed-table-structure>.
 
-| Model                          | Tables  | Acc<sub>Con</sub> | GriTS<sub>Con</sub> | GriTS<sub>Loc</sub> | GriTS<sub>Top</sub> | Epochs |
-|--------------------------------|---------|-------------|---------------|---------------|---------------|--------|
-| TATR v1.0                      | All     | 0.8243      | 0.9850        | 0.9786        | 0.9849        | 20     |
-| TATR v1.1                      | All     | 0.8326      | 0.9855        | 0.9797        | 0.9851        | 28.5   |
-| TATR v1.1 with bug fixes       | All     | 0.8433      | 0.9862        | 0.9806        | 0.9858        | 28     |
-| Constrained box relaxation     | All     | **0.8458**  | **0.9866**    | **0.9811**    | **0.9861**    | 28     |
-| TATR v1.1 with bug fixes       | Simple  | 0.9661      | 0.9947        | 0.9934        | 0.9953        | 28     |
-| Constrained box relaxation     | Simple  | **0.9667**  | **0.9954**    | **0.9941**    | **0.9960**    | 28     |
-| TATR v1.1 with bug fixes       | Complex | 0.7324      | 0.9786        | 0.9693        | **0.9774**    | 28     |
-| Constrained box relaxation     | Complex | **0.7363**  | **0.9789**    | **0.9697**    | 0.9773        | 28     |
+| Model                      | Tables  | Acc<sub>Con</sub> | GriTS<sub>Con</sub> | GriTS<sub>Loc</sub> | GriTS<sub>Top</sub> | Epochs |
+| -------------------------- | ------- | ----------------- | ------------------- | ------------------- | ------------------- | ------ |
+| TATR v1.0                  | All     | 0.8243            | 0.9850              | 0.9786              | 0.9849              | 20     |
+| TATR v1.1                  | All     | 0.8326            | 0.9855              | 0.9797              | 0.9851              | 28.5   |
+| TATR v1.1 with bug fixes   | All     | 0.8433            | 0.9862              | 0.9806              | 0.9858              | 28     |
+| Constrained box relaxation | All     | **0.8458**        | **0.9866**          | **0.9811**          | **0.9861**          | 28     |
+| TATR v1.1 with bug fixes   | Simple  | 0.9661            | 0.9947              | 0.9934              | 0.9953              | 28     |
+| Constrained box relaxation | Simple  | **0.9667**        | **0.9954**          | **0.9941**          | **0.9960**          | 28     |
+| TATR v1.1 with bug fixes   | Complex | 0.7324            | 0.9786              | 0.9693              | **0.9774**          | 28     |
+| Constrained box relaxation | Complex | **0.7363**        | **0.9789**          | **0.9697**          | 0.9773              | 28     |
 
 ## Citation
 If you find this work useful, please cite: Aioanei, D. (2025). *Relaxed Bounding Boxes for Object Detection*. *ICCK Journal of Image Analysis and Processing, 1*(3), 107&ndash;124. [https://doi.org/10.62762/JIAP.2025.507329](https://doi.org/10.62762/JIAP.2025.507329)
